@@ -1,0 +1,11 @@
+{
+    "id": "0123456789123456",
+    "name": "Example Item",
+    "description": "This is an example item used for demonstration purposes.",
+    "price": 19.99,
+    "currency": "USD",
+    "available": true,
+    "categories": ["example", "demo", "test"],
+    "created_at": "2024-06-01T12:00:00Z",
+    "updated_at": "2024-06-01T12:00:00Z"    
+}
