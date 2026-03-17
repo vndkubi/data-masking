@@ -139,7 +139,7 @@ switch ($hookEvent) {
             } catch {}
         }
 
-        Write-AuditLog -Event "PreToolUse-Debug" -Detail "tool=$toolName, hasInput=$($null -ne $toolInput), inputType=$($toolInput.GetType().Name), keys=$($inputData.PSObject.Properties.Name -join ',')"
+        Write-AuditLog -Event "PreToolUse-Debug" -Detail "tool=$toolName, hasInput=$($null -ne $toolInput), inputType=$(if ($null -ne $toolInput) { $toolInput.GetType().Name } else { 'null' }), keys=$($inputData.PSObject.Properties.Name -join ',')"
 
         if ($toolInput) {
             $toolInputStr = if ($toolInput -is [string]) { $toolInput } else { $toolInput | ConvertTo-Json -Depth 10 -Compress }
@@ -339,7 +339,7 @@ CRITICAL FILENAME SECURITY RULE:
             } catch {}
         }
 
-        Write-AuditLog -Event "PostToolUse-Debug" -Detail "tool=$toolName, hasResponse=$($null -ne $toolResponseRaw), responseType=$($toolResponseRaw.GetType().Name), keys=$($inputData.PSObject.Properties.Name -join ',')"
+        Write-AuditLog -Event "PostToolUse-Debug" -Detail "tool=$toolName, hasResponse=$($null -ne $toolResponseRaw), responseType=$(if ($null -ne $toolResponseRaw) { $toolResponseRaw.GetType().Name } else { 'null' }), keys=$($inputData.PSObject.Properties.Name -join ',')"
 
         if ($toolResponseRaw) {
             $toolResponseStr = if ($toolResponseRaw -is [string]) { $toolResponseRaw } else { $toolResponseRaw | ConvertTo-Json -Depth 10 -Compress }
