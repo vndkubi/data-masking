@@ -1,8 +1,9 @@
-﻿#!/bin/bash
+﻿#!/usr/bin/env bash
 # =============================================================
 # Sensitive Data Masker - Copilot Agent Hook
 # Handles: SessionStart, UserPromptSubmit, PreToolUse,
 #           PreCompact, SubagentStart
+# Platforms: Linux, macOS, WSL (Windows Subsystem for Linux)
 # =============================================================
 set -e
 
@@ -12,6 +13,55 @@ DIAG_DIR="$(dirname "$SCRIPT_DIR")/logs"
 mkdir -p "$DIAG_DIR" 2>/dev/null || true
 DIAG_FILE="$DIAG_DIR/hook-debug.log"
 echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] Script invoked, SCRIPT_DIR=$SCRIPT_DIR" >> "$DIAG_FILE" 2>/dev/null || true
+
+# ==============================================================
+# DEPENDENCY CHECK: jq is required
+# ==============================================================
+if ! command -v jq &>/dev/null; then
+    echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] ERROR: jq not found. Install it first:" >> "$DIAG_FILE" 2>/dev/null || true
+    echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')]   Ubuntu/WSL: sudo apt-get install -y jq" >> "$DIAG_FILE" 2>/dev/null || true
+    echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')]   macOS:      brew install jq" >> "$DIAG_FILE" 2>/dev/null || true
+    exit 0
+fi
+
+# ==============================================================
+# CROSS-PLATFORM HELPERS
+# ==============================================================
+
+# Convert Windows-style path (C:\foo\bar or C:/foo/bar) to Unix path.
+# Handles both WSL (uses wslpath) and plain Git Bash (manual /c/ conversion).
+to_unix_path() {
+    local p="$1"
+    if [[ "$p" =~ ^[A-Za-z]:[/\\] ]]; then
+        if command -v wslpath &>/dev/null; then
+            p=$(wslpath "$p" 2>/dev/null) || true
+        else
+            # Git Bash fallback: C:\foo -> /c/foo
+            local drive="${p:0:1}"
+            local rest="${p:2}"
+            drive=$(printf '%s' "$drive" | tr '[:upper:]' '[:lower:]')
+            rest="${rest//\\//}"
+            p="/${drive}${rest}"
+        fi
+    fi
+    printf '%s' "$p"
+}
+
+# Cross-platform case-insensitive sed substitute.
+# GNU sed (Linux/WSL) supports the I flag; BSD sed (macOS) does not.
+# Falls back to perl which is available on all target platforms.
+_sed_replace() {
+    local regex="$1"
+    local replacement="$2"
+    local content="$3"
+    local out
+    # Try GNU sed with I flag first
+    out=$(printf '%s' "$content" | sed -E "s|${regex}|${replacement}|gI" 2>/dev/null) \
+        && { printf '%s' "$out"; return; }
+    # Fall back to perl (macOS, any platform)
+    printf '%s' "$content" | perl -pe "s|${regex}|${replacement}|gi" 2>/dev/null \
+        || printf '%s' "$content"
+}
 
 # Read stdin with error handling
 INPUT=$(cat 2>/dev/null || true)
@@ -34,6 +84,8 @@ echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] Raw JSON: $INPUT" >> "$DIAG_FILE" 2>/de
 # CONFIGURATION
 # ==============================================================
 CWD=$(echo "$INPUT" | jq -r '.cwd // "."')
+# Normalize path so WSL can handle Windows-style CWD (e.g. C:\Users\...)
+CWD=$(to_unix_path "$CWD")
 CONFIG_PATH="$CWD/.github/hooks/masking-config.json"
 EXTERNAL_TOOLS_REGEX="^(search_web|fetch_webpage|mcp_.*|github_repo)$"
 
@@ -65,10 +117,10 @@ mask_sensitive() {
       regex=$(jq -r ".patterns[$i].regex // empty" "$CONFIG_PATH" 2>/dev/null || true)
       replacement=$(jq -r ".patterns[$i].replacement // .patterns[$i].name // empty" "$CONFIG_PATH" 2>/dev/null || true)
       active_regex="${regexBash:-$regex}"
-      # Strip PCRE inline (?i) flag - case-insensitivity handled by I sed flag
+      # Strip PCRE inline (?i) flag - case-insensitivity handled by _sed_replace
       active_regex=$(echo "$active_regex" | sed 's/(?i)//g')
       if [ -n "$active_regex" ] && [ -n "$replacement" ]; then
-        content=$(echo "$content" | sed -E "s|${active_regex}|${replacement}|gI" 2>/dev/null || echo "$content")
+        content=$(_sed_replace "$active_regex" "$replacement" "$content")
       fi
     done
 
@@ -81,7 +133,7 @@ mask_sensitive() {
       cname=$(jq -r ".customPatterns[$i].replacement // .customPatterns[$i].name // empty" "$CONFIG_PATH" 2>/dev/null || true)
       cregex=$(echo "$cregex" | sed 's/(?i)//g')
       if [ -n "$cregex" ] && [ -n "$cname" ]; then
-        content=$(echo "$content" | sed -E "s|${cregex}|${cname}|gI" 2>/dev/null || echo "$content")
+        content=$(_sed_replace "$cregex" "$cname" "$content")
       fi
     done
   fi
@@ -176,9 +228,10 @@ case "$HOOK_EVENT" in
       if [ "$TOOL_NAME" = "read_file" ] || [ "$TOOL_NAME" = "readFile" ]; then
         FILE_PATH=$(echo "$TOOL_INPUT_STR" | jq -r '.filePath // .file_path // .path // empty')
         if [ -n "$FILE_PATH" ]; then
+          # Normalize Windows-style path (WSL support)
+          FILE_PATH=$(to_unix_path "$FILE_PATH")
           # Resolve relative path
           if [[ "$FILE_PATH" != /* ]]; then
-            CWD=$(echo "$INPUT" | jq -r '.cwd // "."')
             FILE_PATH="${CWD}/${FILE_PATH}"
           fi
           if [ -f "$FILE_PATH" ]; then
