@@ -353,6 +353,61 @@ Neither log file ever records the original sensitive values — only event metad
 
 ---
 
+## Inline suggestions
+
+The hook system in this project applies **only to Copilot Chat and agent mode**. It has no effect on inline code completions (ghost text).
+
+For inline suggestions, Copilot sends surrounding code context directly to GitHub servers — there is no client-side API to intercept or modify that payload before transmission.
+
+### What you can do for inline suggestions
+
+**Option 1 — Content Exclusions (recommended)**
+
+Configure at the GitHub repository level: _Settings → Copilot → Content exclusion_. Files matching the patterns will be excluded from Copilot context for inline suggestions.
+
+Example patterns to exclude files containing sensitive data:
+
+```
+*.env
+**/.env*
+**/secrets/**
+**/credentials/**
+data/*.json
+wiremock/**
+```
+
+Content exclusions require a GitHub account. Repository-level exclusions can be set by repository admins. Organization-level exclusions require a Copilot Business or Enterprise plan.
+
+**Option 2 — Disable inline suggestions per file type**
+
+In `.vscode/settings.json` (or user settings):
+
+```json
+{
+  "github.copilot.enable": {
+    "*": true,
+    "dotenv": false,
+    "properties": false,
+    "json": false
+  }
+}
+```
+
+**Option 3 — Rename sensitive files before opening VS Code**
+
+The `invoke-mask` script renames files with numeric names before a session. If those files are not open in the editor, their content is not included in inline suggestion context.
+
+### Coverage summary
+
+| Feature | Copilot Chat / Agent | Inline Suggestions |
+|---|---|---|
+| Hook-based content masking | ✅ This project | ❌ No hook API |
+| Content Exclusions (path-based) | — | ✅ GitHub Settings |
+| Disable per file type | — | ✅ VS Code settings |
+| File renaming (invoke-mask) | ✅ | ✅ |
+
+---
+
 ## Limitations
 
 ### Regex-based detection only
