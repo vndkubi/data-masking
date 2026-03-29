@@ -6,6 +6,7 @@
         "command": "bash .github/hooks/scripts/mask-sensitive-data.sh",
         "linux": "bash .github/hooks/scripts/mask-sensitive-data.sh",
         "osx": "bash .github/hooks/scripts/mask-sensitive-data.sh",
+        "windows": "powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/mask-sensitive-data.ps1",
         "timeout": 15
       }
     ],
@@ -15,6 +16,7 @@
         "command": "bash .github/hooks/scripts/mask-sensitive-data.sh",
         "linux": "bash .github/hooks/scripts/mask-sensitive-data.sh",
         "osx": "bash .github/hooks/scripts/mask-sensitive-data.sh",
+        "windows": "powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/mask-sensitive-data.ps1",
         "timeout": 15
       }
     ],
@@ -24,6 +26,7 @@
         "command": "bash .github/hooks/scripts/mask-sensitive-data.sh",
         "linux": "bash .github/hooks/scripts/mask-sensitive-data.sh",
         "osx": "bash .github/hooks/scripts/mask-sensitive-data.sh",
+        "windows": "powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/mask-sensitive-data.ps1",
         "timeout": 15
       }
     ],
@@ -33,6 +36,7 @@
         "command": "bash .github/hooks/scripts/mask-sensitive-data.sh",
         "linux": "bash .github/hooks/scripts/mask-sensitive-data.sh",
         "osx": "bash .github/hooks/scripts/mask-sensitive-data.sh",
+        "windows": "powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/mask-sensitive-data.ps1",
         "timeout": 15
       }
     ],
@@ -42,6 +46,7 @@
         "command": "bash .github/hooks/scripts/mask-sensitive-data.sh",
         "linux": "bash .github/hooks/scripts/mask-sensitive-data.sh",
         "osx": "bash .github/hooks/scripts/mask-sensitive-data.sh",
+        "windows": "powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/mask-sensitive-data.ps1",
         "timeout": 15
       }
     ],
@@ -51,6 +56,7 @@
         "command": "bash .github/hooks/scripts/mask-sensitive-data.sh",
         "linux": "bash .github/hooks/scripts/mask-sensitive-data.sh",
         "osx": "bash .github/hooks/scripts/mask-sensitive-data.sh",
+        "windows": "powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/mask-sensitive-data.ps1",
         "timeout": 15
       }
     ]

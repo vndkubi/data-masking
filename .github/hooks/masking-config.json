@@ -7,71 +7,92 @@
       "replacement": "[MASKED-PRIVATE-KEY]"
     },
     {
-      "name": "Credit Card (16 digits)",
-      "regex": "\\b\\d{16}\\b",
+      "name": "Credit Card (BIN-matched, 16 digits)",
+      "description": "Masks exactly 16-digit numbers starting with known BIN prefixes. Add BINs to the binPrefixes array.",
+      "binPrefixes": ["970416", "404169", "520000", "370000", "601100"],
+      "regex": "\\b(970416|404169|520000|370000|601100)\\d{10}\\b",
+      "regexBash": "\\b(970416|404169|520000|370000|601100)[0-9]{10}\\b",
       "replacement": "[MASKED-CC]"
     },
     {
-      "name": "Credit Card (formatted)",
+      "name": "Credit Card (formatted with BIN)",
+      "regex": "\\b(9704[- ]16|4041[- ]69|5200[- ]00|3700[- ]00|6011[- ]00)[- ]?\\d{4}[- ]\\d{4}\\b",
+      "regexBash": "\\b(9704[- ]16|4041[- ]69|5200[- ]00|3700[- ]00|6011[- ]00)[- ]?[0-9]{4}[- ][0-9]{4}\\b",
+      "replacement": "[MASKED-CC]"
+    },
+    {
+      "name": "Credit Card (formatted generic)",
       "regex": "\\b\\d{4}[- ]\\d{4}[- ]\\d{4}[- ]\\d{4}\\b",
+      "regexBash": "\\b[0-9]{4}[- ][0-9]{4}[- ][0-9]{4}[- ][0-9]{4}\\b",
       "replacement": "[MASKED-CC]"
-    },
-    {
-      "name": "AWS Access Key",
-      "regex": "AKIA[0-9A-Z]{16}",
-      "replacement": "[MASKED-AWS-KEY]"
-    },
-    {
-      "name": "API Key",
-      "regex": "(?i)(sk|pk|api|token|key)[-_][a-zA-Z0-9]{20,}",
-      "replacement": "\\1-[MASKED-KEY]"
-    },
-    {
-      "name": "Bearer Token",
-      "regex": "(?i)(Bearer\\s+)[a-zA-Z0-9_.~+/=-]{10,}",
-      "replacement": "\\1[MASKED-TOKEN]"
-    },
-    {
-      "name": "Connection String",
-      "regex": "(?i)(mongodb|postgresql|mysql|redis)://[^@]+@[^\\s\"]+",
-      "replacement": "\\1://[MASKED-CONN]"
-    },
-    {
-      "name": "Password in key=value",
-      "regex": "(?i)(password|passwd|pwd|secret|pass)\\s*[=:]\\s*[^\\s\"}{,]+",
-      "replacement": "\\1=[MASKED-PASS]"
-    },
-    {
-      "name": "CCCD Vietnam (12 digits)",
-      "regex": "\\b\\d{12}\\b",
-      "replacement": "[MASKED-CCCD]"
-    },
-    {
-      "name": "Bank Account (10-14 digits)",
-      "regex": "\\b\\d{10,14}\\b",
-      "replacement": "[MASKED-BANK-ACC]"
-    },
-    {
-      "name": "Vietnamese Phone Number",
-      "regex": "(\\+84|0)\\d{9}\\b",
-      "replacement": "[MASKED-PHONE]"
-    },
-    {
-      "name": "CMND Vietnam (9 digits)",
-      "regex": "\\b\\d{9}\\b",
-      "replacement": "[MASKED-ID]"
-    },
-    {
-      "name": "CVV/CVC",
-      "regex": "(?i)(cvv|cvc|cvc2|cvv2)\"\\s*:\\s*\"\\d{3,4}\"",
-      "replacement": "\\1\": \"[MASKED-CVV]\""
     }
+    // {
+    //   "name": "Credit Card (generic 16 digits)",
+    //   "description": "Fallback: masks any standalone 16-digit number. Disable if BIN-only matching is preferred.",
+    //   "enabled": true,
+    //   "regex": "\\b\\d{16}\\b",
+    //   "regexBash": "\\b[0-9]{16}\\b",
+    //   "replacement": "[MASKED-CC]"
+    // },
+    // {
+    //   "name": "AWS Access Key",
+    //   "regex": "AKIA[0-9A-Z]{16}",
+    //   "replacement": "[MASKED-AWS-KEY]"
+    // },
+    // {
+    //   "name": "API Key (sk-/token_ prefix)",
+    //   "regex": "(?i)(sk-|token_)[A-Za-z0-9_\\-]{20,}",
+    //   "regexBash": "(sk-|token_)[A-Za-z0-9_-]{20,}",
+    //   "replacement": "[MASKED-KEY]"
+    // },
+    // {
+    //   "name": "Bearer Token",
+    //   "regex": "(?i)Bearer\\s+[A-Za-z0-9\\._\\-]{10,}",
+    //   "regexBash": "Bearer[[:space:]]+[A-Za-z0-9._-]{10,}",
+    //   "replacement": "Bearer [MASKED-TOKEN]"
+    // },
+    // {
+    //   "name": "Connection String",
+    //   "regex": "(?i)(mongodb|postgresql|mysql|redis|amqp|mssql)://[^\\s\"']+",
+    //   "regexBash": "(mongodb|postgresql|mysql|redis|amqp|mssql)://[^[:space:]\"']+",
+    //   "replacement": "[MASKED-CONN]"
+    // },
+    // {
+    //   "name": "Password/Secret",
+    //   "regex": "(?i)(password|passwd|secret|pwd)[\\s]*[=:][\\s]*[^\\s,;\"'}{]+",
+    //   "regexBash": "(password|passwd|secret|pwd)[[:space:]]*[=:][[:space:]]*[^[:space:],;\"'}{]+",
+    //   "replacement": "$1=[MASKED-PASS]"
+    // },
+    // {
+    //   "name": "CVV in JSON",
+    //   "regex": "(?i)(\"cvv\"\\s*:\\s*)\"\\d{3,4}\"",
+    //   "regexBash": "(\"cvv\"[[:space:]]*:[[:space:]]*)\"[0-9]{3,4}\"",
+    //   "replacement": "$1\"[MASKED-CVV]\""
+    // },
+    // {
+    //   "name": "Vietnamese Phone Number",
+    //   "regex": "(?:(?:\\+84)|0)[3-9]\\d{8}\\b",
+    //   "regexBash": "(\\+84|0)[3-9][0-9]{8}\\b",
+    //   "replacement": "[MASKED-PHONE]"
+    // },
+    // {
+    //   "name": "CCCD Vietnam 12 digits",
+    //   "regex": "\\b\\d{12}\\b",
+    //   "regexBash": "\\b[0-9]{12}\\b",
+    //   "replacement": "[MASKED-CCCD]"
+    // },
+    // {
+    //   "name": "Bank Account 10-14 digits",
+    //   "regex": "\\b\\d{10,14}\\b",
+    //   "regexBash": "\\b[0-9]{10,14}\\b",
+    //   "replacement": "[MASKED-BANK]"
+    // },
+    // {
+    //   "name": "CMND Vietnam 9 digits",
+    //   "regex": "\\b\\d{9}\\b",
+    //   "regexBash": "\\b[0-9]{9}\\b",
+    //   "replacement": "[MASKED-ID]"
+    // }
   ],
-  "customPatterns": [
-    {
-      "name": "[MASKED-MY-SPECIAL-TOKEN]",
-      "regex": "(?i)MySpecialToken_[a-zA-Z0-9]{15,}"
-    }
-  ],
-  "externalToolsRegex": "^(search_web|fetch_webpage|mcp_.*|github_repo|external_api_call)$"
+  "externalToolsRegex": "^(search_web|fetch_webpage|mcp_.*|github_repo|external_api_call|read_file)$"
 }

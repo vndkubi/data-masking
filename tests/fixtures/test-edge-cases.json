@@ -1,0 +1,113 @@
+{
+  "_description": "Edge cases: boundary conditions, mixed content, overlapping patterns",
+  "cases": [
+    {
+      "id": "EDGE-01",
+      "name": "16 digits surrounded by letters (no word boundary)",
+      "input": "refABC9704160123456789XYZ",
+      "expect_masked": false,
+      "note": "No \\b boundary on either side; digits are adjacent to letters"
+    },
+    {
+      "id": "EDGE-02",
+      "name": "16 digits in JSON value (quoted)",
+      "input": "{\"card_number\": \"9704160123456789\"}",
+      "expect_masked": true,
+      "note": "Quotes act as word boundary"
+    },
+    {
+      "id": "EDGE-03",
+      "name": "Multiple patterns in one line",
+      "input": "card=9704160123456789 pwd=Secret123 phone=+84912345678",
+      "expect_masked": true,
+      "expect_contains": "[MASKED-CC]",
+      "expect_also_contains": ["[MASKED-PASS]", "[MASKED-PHONE]"]
+    },
+    {
+      "id": "EDGE-04",
+      "name": "Already masked value - should pass through",
+      "input": "card: [MASKED-CC], key: [MASKED-KEY]",
+      "expect_masked": false,
+      "note": "Already masked; no raw sensitive data"
+    },
+    {
+      "id": "EDGE-05",
+      "name": "Empty string",
+      "input": "",
+      "expect_masked": false
+    },
+    {
+      "id": "EDGE-06",
+      "name": "16 digits with leading zeros",
+      "input": "num: 0000000000000000",
+      "expect_masked": true,
+      "expect_output": "num: [MASKED-CC]",
+      "note": "Generic 16-digit catches this"
+    },
+    {
+      "id": "EDGE-07",
+      "name": "Exactly 16 digits at start of line",
+      "input": "9704160123456789 is the card",
+      "expect_masked": true,
+      "expect_contains": "[MASKED-CC]"
+    },
+    {
+      "id": "EDGE-08",
+      "name": "Exactly 16 digits at end of line",
+      "input": "the card is 9704160123456789",
+      "expect_masked": true,
+      "expect_contains": "[MASKED-CC]"
+    },
+    {
+      "id": "EDGE-09",
+      "name": "20 digits (not card, not bank, not cccd)",
+      "input": "big_ref: 12345678901234567890",
+      "expect_masked": false,
+      "note": "20 digits doesn't match any digit-length pattern"
+    },
+    {
+      "id": "EDGE-10",
+      "name": "Newlines in content with multiple patterns",
+      "input": "line1: 9704160123456789\nline2: password=abc123\nline3: normal text",
+      "expect_masked": true,
+      "expect_contains": "[MASKED-CC]",
+      "expect_also_contains": ["[MASKED-PASS]"]
+    },
+    {
+      "id": "EDGE-11",
+      "name": "Unicode content with sensitive data",
+      "input": "Số thẻ: 9704160123456789, tên: Nguyễn Văn A",
+      "expect_masked": true,
+      "expect_contains": "[MASKED-CC]"
+    },
+    {
+      "id": "EDGE-12",
+      "name": "JSON with card number and CVV together",
+      "input": "{\"number\": \"4041691234567890\", \"cvv\": \"123\", \"expiry\": \"12/25\"}",
+      "expect_masked": true,
+      "expect_contains": "[MASKED-CC]",
+      "expect_also_contains": ["[MASKED-CVV]"]
+    },
+    {
+      "id": "EDGE-13",
+      "name": "BIN prefix 970416 - exactly 16 digits separated by comma",
+      "input": "ids: 9704160123456789,9704160987654321",
+      "expect_masked": true,
+      "note": "Comma acts as word boundary"
+    },
+    {
+      "id": "EDGE-14",
+      "name": "17 digits where first 16 match BIN",
+      "input": "ref: 97041601234567891",
+      "expect_masked": false,
+      "note": "17 digits total — \\b\\d{16}\\b should NOT match"
+    },
+    {
+      "id": "EDGE-15",
+      "name": "16 digits prefixed with # (non-word char)",
+      "input": "ref: #9704160123456789",
+      "expect_masked": true,
+      "note": "# is non-word, acts as boundary"
+    }
+  ]
+}
