@@ -1,0 +1,13 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "allow",
+    "permissionDecisionReason": "Email input normalized before execution.",
+    "updatedInput": {
+      "customerId": "CUST-1003",
+      "email": "alice.nguyen@example.com",
+      "source": "demo-form"
+    },
+    "additionalContext": "The hook trimmed whitespace and lowercased the email value."
+  }
+}

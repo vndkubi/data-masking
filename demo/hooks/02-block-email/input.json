@@ -1,0 +1,9 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "save_customer_email",
+  "tool_input": {
+    "customerId": "CUST-1002",
+    "email": "partner@blocked.example",
+    "source": "demo-form"
+  }
+}

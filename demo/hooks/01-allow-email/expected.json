@@ -1,0 +1,13 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "allow",
+    "permissionDecisionReason": "Email input allowed.",
+    "updatedInput": {
+      "customerId": "CUST-1001",
+      "email": "dana@contoso.com",
+      "source": "demo-form"
+    },
+    "additionalContext": "The email already satisfied the policy. No changes were required."
+  }
+}
