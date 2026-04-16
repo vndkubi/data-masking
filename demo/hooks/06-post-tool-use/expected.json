@@ -1,6 +1,0 @@
-{
-  "hookSpecificOutput": {
-    "hookEventName": "PostToolUse",
-    "additionalContext": "PostToolUse payload was logged to logs/demo-04-post-tool-use.json. Sanitized response preview:\n{\"message\":\"Customer contact is [MASKED-EMAIL]\"}"
-  }
-}

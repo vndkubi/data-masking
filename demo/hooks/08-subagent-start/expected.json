@@ -1,6 +1,0 @@
-{
-  "hookSpecificOutput": {
-    "hookEventName": "SubagentStart",
-    "additionalContext": "SubagentStart payload was logged to logs/demo-06-subagent-start.json for agent 'Explore'. Use it to explain what context is passed to sub-agents."
-  }
-}

@@ -1,6 +1,0 @@
-{
-  "hookSpecificOutput": {
-    "hookEventName": "SessionStart",
-    "additionalContext": "DEMO TRACE: SessionStart payload was logged to logs/demo-01-session-start.json. Open the log file to see what Copilot sends when a session starts."
-  }
-}

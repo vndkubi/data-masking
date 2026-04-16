@@ -1,7 +1,0 @@
-{
-    "customer_id": "demo-001",
-    "full_name": "Alice Nguyen",
-    "email": "alice.nguyen@example.com",
-    "alternate_email": "finance-demo@example.org",
-    "status": "pending-verification"
-}

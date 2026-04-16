@@ -1,5 +1,0 @@
-{
-  "hook_event_name": "UserPromptSubmit",
-  "prompt": "Please send the masked transcript to alice.nguyen@example.com before noon.",
-  "cwd": "."
-}

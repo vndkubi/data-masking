@@ -1,8 +1,0 @@
-{
-  "hook_event_name": "PostToolUse",
-  "tool_name": "fetch_webpage",
-  "tool_response": {
-    "message": "Customer contact is alice.nguyen@example.com"
-  },
-  "cwd": "."
-}

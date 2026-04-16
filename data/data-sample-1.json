@@ -1,6 +1,0 @@
-{
-  "ticket_id": "support-014",
-  "requester_email": "ops-demo@example.com",
-  "backup_email": "alerts@example.net",
-  "subject": "Hook demo payload"
-}

@@ -1,5 +1,0 @@
-{
-  "hook_event_name": "SubagentStart",
-  "agent_type": "Explore",
-  "cwd": "."
-}
