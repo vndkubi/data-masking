@@ -1,6 +1,6 @@
 {
-    "cvv": "123",
-    "expiry_month": "12",
-    "expiry_year": "2025",
-    "number": "9704161234567890"
+  "ticket_id": "support-014",
+  "requester_email": "ops-demo@example.com",
+  "backup_email": "alerts@example.net",
+  "subject": "Hook demo payload"
 }

@@ -1,0 +1,10 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "run_in_terminal",
+  "tool_input": {
+    "command": "Write-Host \"notify alice.nguyen@example.com\"",
+    "explanation": "Demo command with sensitive input",
+    "goal": "Show automatic masking"
+  },
+  "cwd": "."
+}

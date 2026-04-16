@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "type": "command",
+        "command": "bash .github/hooks/scripts/03-pre-tool-use.sh",
+        "linux": "bash .github/hooks/scripts/03-pre-tool-use.sh",
+        "osx": "bash .github/hooks/scripts/03-pre-tool-use.sh",
+        "windows": "powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/03-pre-tool-use.ps1",
+        "timeout": 15
+      }
+    ]
+  }
+}

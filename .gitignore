@@ -1,1 +1,3 @@
 **/wiremock/**/__files/
+logs/*.log
+.github/hooks/logs/*.log

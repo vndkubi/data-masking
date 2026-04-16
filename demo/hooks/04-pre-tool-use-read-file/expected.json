@@ -1,0 +1,7 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "SUPPORT DEMO: Raw ticket content contains customer contact data. Use this sanitized ticket snapshot instead:\n{\n  \"ticket_id\": \"support-014\",\n  \"requester_email\": \"[MASKED-EMAIL]\",\n  \"backup_email\": \"[MASKED-EMAIL]\",\n  \"subject\": \"Hook demo payload\"\n}\nOnly quote the sanitized snapshot in your response."
+  }
+}

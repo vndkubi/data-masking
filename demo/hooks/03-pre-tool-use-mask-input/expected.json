@@ -1,0 +1,13 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "allow",
+    "permissionDecisionReason": "Support action sanitized before tool execution",
+    "updatedInput": {
+      "command": "Write-Host \"notify [MASKED-EMAIL]\"",
+      "explanation": "Demo command with sensitive input",
+      "goal": "Show automatic masking"
+    },
+    "additionalContext": "The support workflow may continue, but only with masked customer contact data."
+  }
+}

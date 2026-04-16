@@ -1,0 +1,11 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "permissionDecision": "allow",
+    "permissionDecisionReason": "Customer contact data masked for the support escalation demo",
+    "updatedInput": {
+      "prompt": "Please send the masked transcript to [MASKED-EMAIL] before noon."
+    },
+    "systemMessage": "The customer's contact data was masked before the prompt entered the support workflow."
+  }
+}

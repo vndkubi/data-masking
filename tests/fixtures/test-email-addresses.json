@@ -1,0 +1,52 @@
+{
+  "_description": "Email masking basics for the demo project.",
+  "cases": [
+    {
+      "id": "EMAIL-01",
+      "name": "Plain email address",
+      "input": "email: alice.nguyen@example.com",
+      "expect_masked": true,
+      "expect_output": "email: [MASKED-EMAIL]"
+    },
+    {
+      "id": "EMAIL-02",
+      "name": "JSON field with email",
+      "input": "{\"email\":\"support@example.org\"}",
+      "expect_masked": true,
+      "expect_output": "{\"email\":\"[MASKED-EMAIL]\"}"
+    },
+    {
+      "id": "EMAIL-03",
+      "name": "Plus alias address",
+      "input": "owner=billing+demo@example.net",
+      "expect_masked": true,
+      "expect_output": "owner=[MASKED-EMAIL]"
+    },
+    {
+      "id": "EMAIL-04",
+      "name": "Two emails in one line",
+      "input": "primary: alice@example.com, backup: bob@example.org",
+      "expect_masked": true,
+      "expect_output": "primary: [MASKED-EMAIL], backup: [MASKED-EMAIL]"
+    },
+    {
+      "id": "EMAIL-05",
+      "name": "Uppercase characters in address",
+      "input": "USER=TEAM.DEMO@EXAMPLE.COM",
+      "expect_masked": true,
+      "expect_output": "USER=[MASKED-EMAIL]"
+    },
+    {
+      "id": "EMAIL-06",
+      "name": "Invalid address without TLD",
+      "input": "email: demo@example",
+      "expect_masked": false
+    },
+    {
+      "id": "EMAIL-07",
+      "name": "Normal text without email",
+      "input": "This line is safe for the model.",
+      "expect_masked": false
+    }
+  ]
+}

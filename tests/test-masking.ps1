@@ -6,7 +6,7 @@
 #
 # Usage:
 #   .\tests\test-masking.ps1
-#   .\tests\test-masking.ps1 -FixturePath .\tests\fixtures\test-credit-card-bin.json
+#   .\tests\test-masking.ps1 -FixturePath .\tests\fixtures\test-email-addresses.json
 # =============================================================
 param(
     [string]$FixturePath = "",
@@ -40,7 +40,8 @@ if (-not (Test-Path $ConfigPath)) {
 # ------------------------------------------------------------------
 # Load config patterns
 # ------------------------------------------------------------------
-$config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+$rawJson = (Get-Content $ConfigPath -Raw -Encoding UTF8) -replace '(?m)^\s*//.*$', ''
+$config = $rawJson | ConvertFrom-Json
 
 function Invoke-Mask {
     param([string]$Content)

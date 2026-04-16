@@ -1,0 +1,6 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "SubagentStart",
+    "additionalContext": "SUPPORT DEMO POLICY (inherited): investigate the ticket using only [MASKED-EMAIL] placeholders. Do not restore raw customer contact data, and keep all hand-offs sanitized."
+  }
+}

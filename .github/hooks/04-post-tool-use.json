@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "type": "command",
+        "command": "bash .github/hooks/scripts/04-post-tool-use.sh",
+        "linux": "bash .github/hooks/scripts/04-post-tool-use.sh",
+        "osx": "bash .github/hooks/scripts/04-post-tool-use.sh",
+        "windows": "powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/04-post-tool-use.ps1",
+        "timeout": 15
+      }
+    ]
+  }
+}

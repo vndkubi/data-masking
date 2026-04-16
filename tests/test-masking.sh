@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # =============================================================
 # test-masking.sh
-# Cross-platform test runner for mask-sensitive-data.sh
+# Cross-platform test runner for the UserPromptSubmit demo hook
 # Works on: Linux, macOS, WSL, Git Bash (Windows)
 #
 # Usage:
 #   bash tests/test-masking.sh
-#   bash tests/test-masking.sh tests/fixtures/test-credit-card-bin.json
+#   bash tests/test-masking.sh tests/fixtures/test-email-addresses.json
 # =============================================================
 set -euo pipefail
 
@@ -50,7 +50,7 @@ to_unix_path() {
 }
 
 PROJECT_ROOT="$(to_unix_path "$PROJECT_ROOT")"
-HOOK_SCRIPT="$PROJECT_ROOT/.github/hooks/scripts/mask-sensitive-data.sh"
+HOOK_SCRIPT="$PROJECT_ROOT/.github/hooks/scripts/02-user-prompt-submit.sh"
 CONFIG_PATH="$PROJECT_ROOT/.github/hooks/masking-config.json"
 FIXTURE_DIR="$PROJECT_ROOT/tests/fixtures"
 

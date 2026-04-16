@@ -1,0 +1,7 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "ask",
+    "permissionDecisionReason": "Support demo safeguard: the external lookup 'fetch_webpage' includes customer contact data. Confirm that you want to send it, or mask it first."
+  }
+}
