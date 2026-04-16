@@ -10,5 +10,6 @@ INPUT="$(demo_read_input)"
 demo_init_context "$INPUT" || exit 0
 [ "$DEMO_HOOK_EVENT" != "PreCompact" ] && exit 0
 
-demo_audit "PreCompact" "Support escalation summary prepared for compacted context"
-jq -n '{"systemMessage":"Support demo reminder: compact only masked ticket notes, masked customer contacts, and safe action summaries."}'
+LOG_PATH="$(demo_write_state_log "$INPUT" "Captured PreCompact payload for demo")"
+demo_audit "PreCompact" "Logged PreCompact payload to $LOG_PATH"
+jq -n --arg message "PreCompact payload was logged to $LOG_PATH. Use it to explain what Copilot sends before compaction." '{"systemMessage":$message}'

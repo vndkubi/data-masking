@@ -1,14 +1,14 @@
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "type": "command",
-        "command": "bash .github/hooks/scripts/02-user-prompt-submit.sh",
-        "linux": "bash .github/hooks/scripts/02-user-prompt-submit.sh",
-        "osx": "bash .github/hooks/scripts/02-user-prompt-submit.sh",
-        "windows": "powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/02-user-prompt-submit.ps1",
-        "timeout": 15
-      }
-    ]
-  }
-}
+// {
+//   "hooks": {
+//     "UserPromptSubmit": [
+//       {
+//         "type": "command",
+//         "command": "bash .github/hooks/scripts/02-user-prompt-submit.sh",
+//         "linux": "bash .github/hooks/scripts/02-user-prompt-submit.sh",
+//         "osx": "bash .github/hooks/scripts/02-user-prompt-submit.sh",
+//         "windows": "powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/02-user-prompt-submit.ps1",
+//         "timeout": 15
+//       }
+//     ]
+//   }
+// }

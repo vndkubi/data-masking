@@ -11,10 +11,7 @@ demo_init_context "$INPUT" || exit 0
 [ "$DEMO_HOOK_EVENT" != "UserPromptSubmit" ] && exit 0
 
 PROMPT=$(printf '%s' "$INPUT" | jq -r '.prompt // empty' 2>/dev/null || true)
-[ -z "$PROMPT" ] && exit 0
-
-if demo_has_sensitive "$PROMPT"; then
-	MASKED_PROMPT=$(demo_mask_sensitive "$PROMPT")
-	demo_audit "UserPromptSubmit" "Customer contact masked before support prompt execution"
-	jq -n --arg prompt "$MASKED_PROMPT" --arg message "The customer's contact data was masked before the prompt entered the support workflow." '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","permissionDecision":"allow","permissionDecisionReason":"Customer contact data masked for the support escalation demo","updatedInput":{"prompt":$prompt},"systemMessage":$message}}'
-fi
+MASKED_PROMPT=$(demo_mask_sensitive "$PROMPT")
+LOG_PATH="$(demo_write_state_log "$INPUT" "Captured UserPromptSubmit payload for demo")"
+demo_audit "UserPromptSubmit" "Logged UserPromptSubmit payload to $LOG_PATH"
+jq -n --arg prompt "$MASKED_PROMPT" --arg message "UserPromptSubmit payload was logged to $LOG_PATH. Use the log file to show the sanitized prompt." '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","permissionDecision":"allow","permissionDecisionReason":"Demo trace saved for UserPromptSubmit","updatedInput":{"prompt":$prompt},"systemMessage":$message}}'

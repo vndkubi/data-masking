@@ -1,15 +1,13 @@
 # Hook Demo Samples
 
-This demo is organized as one support-escalation story that moves through the full hook lifecycle.
+This demo is organized as a simple hook-state walkthrough.
 
 Story line:
 
-- A support agent starts a Copilot session for a customer ticket.
-- The user's prompt contains customer contact data.
-- Internal tools must be sanitized before execution.
-- Raw ticket reads are blocked and replaced with a sanitized snapshot.
-- External lookups require confirmation.
-- Returned results, compacted summaries, and sub-agent hand-offs stay masked.
+- Start one hook state.
+- Let the hook write a sanitized payload log.
+- Open the generated log file.
+- Explain what data Copilot sent into that state.
 
 This directory is organized so each demoable hook scenario has its own folder.
 
@@ -29,6 +27,15 @@ Recommended order:
 6. `hooks/06-post-tool-use`
 7. `hooks/07-pre-compact`
 8. `hooks/08-subagent-start`
+
+Generated log files to open during the demo:
+
+- `logs/demo-01-session-start.json`
+- `logs/demo-02-user-prompt-submit.json`
+- `logs/demo-03-pre-tool-use.json`
+- `logs/demo-04-post-tool-use.json`
+- `logs/demo-05-pre-compact.json`
+- `logs/demo-06-subagent-start.json`
 
 Run a scenario on PowerShell:
 

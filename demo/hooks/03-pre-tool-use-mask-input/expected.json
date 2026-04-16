@@ -2,12 +2,12 @@
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "allow",
-    "permissionDecisionReason": "Support action sanitized before tool execution",
+    "permissionDecisionReason": "Demo trace saved for PreToolUse (tool: run_in_terminal)",
     "updatedInput": {
       "command": "Write-Host \"notify [MASKED-EMAIL]\"",
       "explanation": "Demo command with sensitive input",
       "goal": "Show automatic masking"
     },
-    "additionalContext": "The support workflow may continue, but only with masked customer contact data."
+    "additionalContext": "PreToolUse payload was logged to logs/demo-03-pre-tool-use.json. Use the log file to explain what the hook receives before 'run_in_terminal' runs."
   }
 }

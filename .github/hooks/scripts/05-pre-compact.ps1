@@ -8,5 +8,6 @@ if ([string]::IsNullOrWhiteSpace($rawInput)) { exit 0 }
 $hookData = Initialize-DemoContext -RawInput $rawInput
 if (-not $hookData -or (Get-DemoHookEventName -HookData $hookData) -ne 'PreCompact') { exit 0 }
 
-Write-DemoAudit 'PreCompact' 'Support escalation summary prepared for compacted context'
-Write-DemoJsonOutput @{ systemMessage = 'Support demo reminder: compact only masked ticket notes, masked customer contacts, and safe action summaries.' }
+$logPath = Write-DemoStateLog -HookData $hookData -Summary 'Captured PreCompact payload for demo'
+Write-DemoAudit 'PreCompact' "Logged PreCompact payload to $logPath"
+Write-DemoJsonOutput @{ systemMessage = "PreCompact payload was logged to $logPath. Use it to explain what Copilot sends before compaction." }

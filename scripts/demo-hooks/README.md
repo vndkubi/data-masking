@@ -2,32 +2,41 @@
 
 This folder contains one Bash wrapper script per demo step.
 
-Each script calls `scripts/run-hook-demo.sh` with the matching scenario under `demo/hooks/`, so you can present the full support-escalation story one step at a time without typing long commands.
+Each script calls `scripts/run-hook-demo.sh` with the matching scenario under `demo/hooks/`, so you can present each hook state one step at a time without typing long commands.
 
 ## What These Scripts Are For
 
 - Quick live demo from one folder
 - Step-by-step walkthrough of each hook event
 - Easier presentation flow for Bash or WSL users
+- Open one generated log file after each step and explain the payload
 
 ## Demo Order
 
 1. `01-session-start.sh`
-   Shows the support-escalation policy injected at session start.
+   Logs the payload received at session start.
+   Output: prints a JSON object pointing you to `logs/demo-01-session-start.json`, then prints `Expected output matched.` when the scenario matches.
 2. `02-user-prompt-submit.sh`
-   Shows prompt masking for customer email data.
+   Logs the sanitized prompt payload.
+   Output: prints a JSON object with masked `updatedInput.prompt` and points you to `logs/demo-02-user-prompt-submit.json`, then prints `Expected output matched.`.
 3. `03-pre-tool-use-mask-input.sh`
-   Shows automatic masking of internal tool input.
+   Logs the payload received before a normal tool call.
+   Output: prints a JSON object with masked `updatedInput` and points you to `logs/demo-03-pre-tool-use.json`, then prints `Expected output matched.`.
 4. `04-pre-tool-use-read-file.sh`
-   Shows deny-and-sanitize behavior for sensitive file reads.
+   Logs the payload received before a `read_file` tool call.
+   Output: prints a JSON object and points you to `logs/demo-03-pre-tool-use.json`, then prints `Expected output matched.`.
 5. `05-pre-tool-use-external-tool.sh`
-   Shows the confirmation step before sending sensitive data to an external tool.
+   Logs the payload received before an external tool call.
+   Output: prints a JSON object with masked `updatedInput` and points you to `logs/demo-03-pre-tool-use.json`, then prints `Expected output matched.`.
 6. `06-post-tool-use.sh`
-   Shows masking of sensitive data returned by a tool.
+   Logs the payload received after a tool returns data.
+   Output: prints a JSON object pointing you to `logs/demo-04-post-tool-use.json` and shows a sanitized preview, then prints `Expected output matched.`.
 7. `07-pre-compact.sh`
-   Shows the reminder before compacting context.
+   Logs the payload received before compaction.
+   Output: prints a JSON object pointing you to `logs/demo-05-pre-compact.json`, then prints `Expected output matched.`.
 8. `08-subagent-start.sh`
-   Shows the inherited masking policy for sub-agents.
+   Logs the payload passed into a sub-agent.
+   Output: prints a JSON object pointing you to `logs/demo-06-subagent-start.json`, then prints `Expected output matched.`.
 
 ## Usage
 
@@ -52,8 +61,17 @@ bash scripts/demo-hooks/08-subagent-start.sh
 
 If the scenario output matches the expected file, the runner prints `Expected output matched.`
 
+Suggested demo flow:
+
+1. Run one wrapper script.
+2. Show the JSON output in terminal.
+3. Open the matching `logs/demo-*.json` file.
+4. Explain the payload for that hook state.
+
 ## Notes
 
 - These wrappers are Bash entrypoints only.
 - They depend on `scripts/run-hook-demo.sh`.
 - The actual payloads and expected outputs live under `demo/hooks/`.
+- The real hook implementations are in `.github/hooks/scripts/`.
+- PowerShell equivalents for the real hook steps live in `.github/hooks/scripts/*.ps1`.

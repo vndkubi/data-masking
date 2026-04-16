@@ -9,10 +9,11 @@ $hookData = Initialize-DemoContext -RawInput $rawInput
 if (-not $hookData -or (Get-DemoHookEventName -HookData $hookData) -ne 'SubagentStart') { exit 0 }
 
 $agentType = if ($hookData.agent_type) { $hookData.agent_type } else { 'unknown' }
-Write-DemoAudit 'SubagentStart' "Delegated sanitized support task to $agentType"
+$logPath = Write-DemoStateLog -HookData $hookData -Summary "Captured SubagentStart payload for agent '$agentType'"
+Write-DemoAudit 'SubagentStart' "Logged SubagentStart payload for $agentType to $logPath"
 Write-DemoJsonOutput @{
     hookSpecificOutput = @{
         hookEventName = 'SubagentStart'
-        additionalContext = 'SUPPORT DEMO POLICY (inherited): investigate the ticket using only [MASKED-EMAIL] placeholders. Do not restore raw customer contact data, and keep all hand-offs sanitized.'
+        additionalContext = "SubagentStart payload was logged to $logPath for agent '$agentType'. Use it to explain what context is passed to sub-agents."
     }
 }

@@ -1,7 +1,14 @@
 {
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
-    "permissionDecision": "ask",
-    "permissionDecisionReason": "Support demo safeguard: the external lookup 'fetch_webpage' includes customer contact data. Confirm that you want to send it, or mask it first."
+    "permissionDecision": "allow",
+    "permissionDecisionReason": "Demo trace saved for PreToolUse (tool: fetch_webpage)",
+    "updatedInput": {
+      "urls": [
+        "https://example.com/support"
+      ],
+      "query": "Look up [MASKED-EMAIL] in the help page"
+    },
+    "additionalContext": "PreToolUse payload was logged to logs/demo-03-pre-tool-use.json. Use the log file to explain what the hook receives before 'fetch_webpage' runs."
   }
 }

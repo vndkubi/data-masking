@@ -203,3 +203,46 @@ demo_resolve_file_path() {
   fi
   printf '%s' "$file_path"
 }
+
+demo_get_state_log_name() {
+  case "$DEMO_HOOK_EVENT" in
+    SessionStart) printf 'demo-01-session-start.json' ;;
+    UserPromptSubmit) printf 'demo-02-user-prompt-submit.json' ;;
+    PreToolUse) printf 'demo-03-pre-tool-use.json' ;;
+    PostToolUse) printf 'demo-04-post-tool-use.json' ;;
+    PreCompact) printf 'demo-05-pre-compact.json' ;;
+    SubagentStart) printf 'demo-06-subagent-start.json' ;;
+    *) printf 'demo-unknown-state.json' ;;
+  esac
+}
+
+demo_write_state_log() {
+  local input_json="$1"
+  local summary="$2"
+  local log_name relative_path full_path masked_json payload_json
+
+  log_name="$(demo_get_state_log_name)"
+  relative_path="logs/$log_name"
+  full_path="$DEMO_CWD/logs/$log_name"
+  masked_json="$(demo_mask_sensitive "$input_json")"
+
+  if printf '%s' "$masked_json" | jq '.' >/dev/null 2>&1; then
+    payload_json=$(printf '%s' "$masked_json" | jq -c '.')
+    jq -n \
+      --arg timestamp "$(demo_ts)" \
+      --arg event "$DEMO_HOOK_EVENT" \
+      --arg summary "$summary" \
+      --argjson payload "$payload_json" \
+      '{timestamp:$timestamp,hookEventName:$event,summary:$summary,payload:$payload}' > "$full_path"
+  else
+    jq -n \
+      --arg timestamp "$(demo_ts)" \
+      --arg event "$DEMO_HOOK_EVENT" \
+      --arg summary "$summary" \
+      --arg payload "$masked_json" \
+      '{timestamp:$timestamp,hookEventName:$event,summary:$summary,payload:$payload}' > "$full_path"
+  fi
+
+  demo_diag "Wrote demo state log: $relative_path"
+  printf '%s' "$relative_path"
+}

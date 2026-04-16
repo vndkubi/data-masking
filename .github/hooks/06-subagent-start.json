@@ -1,14 +1,14 @@
-{
-  "hooks": {
-    "SubagentStart": [
-      {
-        "type": "command",
-        "command": "bash .github/hooks/scripts/06-subagent-start.sh",
-        "linux": "bash .github/hooks/scripts/06-subagent-start.sh",
-        "osx": "bash .github/hooks/scripts/06-subagent-start.sh",
-        "windows": "powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/06-subagent-start.ps1",
-        "timeout": 15
-      }
-    ]
-  }
-}
+// {
+//   "hooks": {
+//     "SubagentStart": [
+//       {
+//         "type": "command",
+//         "command": "bash .github/hooks/scripts/06-subagent-start.sh",
+//         "linux": "bash .github/hooks/scripts/06-subagent-start.sh",
+//         "osx": "bash .github/hooks/scripts/06-subagent-start.sh",
+//         "windows": "powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/06-subagent-start.ps1",
+//         "timeout": 15
+//       }
+//     ]
+//   }
+// }

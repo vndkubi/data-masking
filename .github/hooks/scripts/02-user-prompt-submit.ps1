@@ -9,16 +9,15 @@ $hookData = Initialize-DemoContext -RawInput $rawInput
 if (-not $hookData -or (Get-DemoHookEventName -HookData $hookData) -ne 'UserPromptSubmit') { exit 0 }
 
 $prompt = if ($hookData.prompt) { $hookData.prompt } else { $null }
-if ($prompt -and (Test-DemoSensitive $prompt)) {
-    $maskedPrompt = Invoke-DemoMask $prompt
-    Write-DemoAudit 'UserPromptSubmit' 'Customer contact masked before support prompt execution'
-    Write-DemoJsonOutput @{
-        hookSpecificOutput = @{
-            hookEventName = 'UserPromptSubmit'
-            permissionDecision = 'allow'
-            permissionDecisionReason = 'Customer contact data masked for the support escalation demo'
-            updatedInput = @{ prompt = $maskedPrompt }
-            systemMessage = "The customer's contact data was masked before the prompt entered the support workflow."
-        }
+$maskedPrompt = if ($prompt) { Invoke-DemoMask $prompt } else { '' }
+$logPath = Write-DemoStateLog -HookData $hookData -Summary 'Captured UserPromptSubmit payload for demo'
+Write-DemoAudit 'UserPromptSubmit' "Logged UserPromptSubmit payload to $logPath"
+Write-DemoJsonOutput @{
+    hookSpecificOutput = @{
+        hookEventName = 'UserPromptSubmit'
+        permissionDecision = 'allow'
+        permissionDecisionReason = 'Demo trace saved for UserPromptSubmit'
+        updatedInput = @{ prompt = $maskedPrompt }
+        systemMessage = "UserPromptSubmit payload was logged to $logPath. Use the log file to show the sanitized prompt."
     }
 }

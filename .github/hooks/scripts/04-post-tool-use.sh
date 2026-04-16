@@ -12,9 +12,7 @@ demo_init_context "$INPUT" || exit 0
 
 TOOL_NAME=$(printf '%s' "$INPUT" | jq -r '.tool_name // .toolName // "unknown"' 2>/dev/null || printf 'unknown')
 TOOL_RESPONSE=$(printf '%s' "$INPUT" | jq -c '.tool_response // .toolResponse // .output // empty' 2>/dev/null || true)
-
-if [ -n "$TOOL_RESPONSE" ] && demo_has_sensitive "$TOOL_RESPONSE"; then
-	MASKED_RESPONSE=$(demo_mask_sensitive "$TOOL_RESPONSE")
-	demo_audit "PostToolUse" "External support lookup result sanitized"
-	jq -n --arg tool "$TOOL_NAME" --arg context "SUPPORT DEMO ALERT: The tool '$tool' returned customer contact data. Reuse only this sanitized result:\n$MASKED_RESPONSE" '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":$context}}'
-fi
+MASKED_RESPONSE=$(demo_mask_sensitive "$TOOL_RESPONSE")
+LOG_PATH="$(demo_write_state_log "$INPUT" "Captured PostToolUse payload for tool '$TOOL_NAME'")"
+demo_audit "PostToolUse" "Logged PostToolUse payload for $TOOL_NAME to $LOG_PATH"
+jq -n --arg context "PostToolUse payload was logged to $LOG_PATH. Sanitized response preview:\n$MASKED_RESPONSE" '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":$context}}'

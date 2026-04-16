@@ -11,5 +11,6 @@ demo_init_context "$INPUT" || exit 0
 [ "$DEMO_HOOK_EVENT" != "SubagentStart" ] && exit 0
 
 AGENT_TYPE=$(printf '%s' "$INPUT" | jq -r '.agent_type // "unknown"' 2>/dev/null || printf 'unknown')
-demo_audit "SubagentStart" "Delegated sanitized support task to $AGENT_TYPE"
-jq -n --arg context "SUPPORT DEMO POLICY (inherited): investigate the ticket using only [MASKED-EMAIL] placeholders. Do not restore raw customer contact data, and keep all hand-offs sanitized." '{"hookSpecificOutput":{"hookEventName":"SubagentStart","additionalContext":$context}}'
+LOG_PATH="$(demo_write_state_log "$INPUT" "Captured SubagentStart payload for agent '$AGENT_TYPE'")"
+demo_audit "SubagentStart" "Logged SubagentStart payload for $AGENT_TYPE to $LOG_PATH"
+jq -n --arg context "SubagentStart payload was logged to $LOG_PATH for agent '$AGENT_TYPE'. Use it to explain what context is passed to sub-agents." '{"hookSpecificOutput":{"hookEventName":"SubagentStart","additionalContext":$context}}'

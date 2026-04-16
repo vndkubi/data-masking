@@ -18,4 +18,8 @@ Shared helpers:
 - `scripts/hook-demo-common.sh`
 - `scripts/HookDemoCommon.ps1`
 
+Implementation details:
+
+- `scripts/README.md` explains what each `.sh` and `.ps1` file does and what output shape it returns.
+
 VS Code Copilot merges all `.json` files under `.github/hooks/`, so splitting the wiring does not change behavior.

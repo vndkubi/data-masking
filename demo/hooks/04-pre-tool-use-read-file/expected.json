@@ -1,7 +1,13 @@
 {
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
-    "permissionDecision": "deny",
-    "permissionDecisionReason": "SUPPORT DEMO: Raw ticket content contains customer contact data. Use this sanitized ticket snapshot instead:\n{\n  \"ticket_id\": \"support-014\",\n  \"requester_email\": \"[MASKED-EMAIL]\",\n  \"backup_email\": \"[MASKED-EMAIL]\",\n  \"subject\": \"Hook demo payload\"\n}\nOnly quote the sanitized snapshot in your response."
+    "permissionDecision": "allow",
+    "permissionDecisionReason": "Demo trace saved for PreToolUse (tool: read_file)",
+    "updatedInput": {
+      "filePath": "data/data-sample-1.json",
+      "startLine": 1,
+      "endLine": 200
+    },
+    "additionalContext": "PreToolUse payload was logged to logs/demo-03-pre-tool-use.json. Use the log file to explain what the hook receives before 'read_file' runs."
   }
 }

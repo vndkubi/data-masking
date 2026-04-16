@@ -1,24 +1,24 @@
 {
-  "hooks": {},
-  "patterns": [
-    {
-      "name": "Private Key/Certificate",
-      "regex": "-----BEGIN [A-Z ]+KEY-----[\\s\\S]*?-----END [A-Z ]+KEY-----",
-      "regexBash": "-----BEGIN [A-Z ]+KEY-----[^-]*-----END [A-Z ]+KEY-----",
-      "replacement": "[MASKED-PRIVATE-KEY]"
-    },
-    {
-      "name": "Email Address",
-      "description": "Email-first demo pattern. Preserves surrounding punctuation while masking the address itself.",
-      "regex": "(^|[^A-Za-z0-9._%+\\-])([A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,})([^A-Za-z0-9_%+\\-]|$)",
-      "regexBash": "(^|[^A-Za-z0-9._%+-])([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,})([^A-Za-z0-9_%+-]|$)",
-      "replacement": "$1[MASKED-EMAIL]$3"
-    }
-    // {
-    //   "name": "API Key",
-    //   "regex": "(sk-|token_)[A-Za-z0-9_-]{20,}",
-    //   "replacement": "[MASKED-KEY]"
-    // }
-  ],
-  "externalToolsRegex": "^(search_web|fetch_webpage|mcp_.*|github_repo|external_api_call)$"
+	"hooks": {},
+	"patterns": [
+		{
+			"name": "Private Key/Certificate",
+			"regex": "-----BEGIN [A-Z ]+KEY-----[\\s\\S]*?-----END [A-Z ]+KEY-----",
+			"regexBash": "-----BEGIN [A-Z ]+KEY-----[^-]*-----END [A-Z ]+KEY-----",
+			"replacement": "[MASKED-PRIVATE-KEY]"
+		},
+		{
+			"name": "Email Address",
+			"description": "Email-first demo pattern. Preserves surrounding punctuation while masking the address itself.",
+			"regex": "(^|[^A-Za-z0-9._%+\\-])([A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,})([^A-Za-z0-9_%+\\-]|$)",
+			"regexBash": "(^|[^A-Za-z0-9._%+-])([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,})([^A-Za-z0-9_%+-]|$)",
+			"replacement": "$1[MASKED-EMAIL]$3"
+		}
+		// {
+		//   "name": "API Key",
+		//   "regex": "(sk-|token_)[A-Za-z0-9_-]{20,}",
+		//   "replacement": "[MASKED-KEY]"
+		// }
+	],
+	"externalToolsRegex": "^(search_web|fetch_webpage|mcp_.*|github_repo|external_api_call)$"
 }

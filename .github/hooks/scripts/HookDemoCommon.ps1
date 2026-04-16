@@ -170,3 +170,53 @@ function Get-DemoToolResponseObject {
     if ($null -ne $HookData.output) { return $HookData.output }
     return $null
 }
+
+function Get-DemoStateLogName {
+    switch ($script:DemoHookEvent) {
+        'SessionStart' { return 'demo-01-session-start.json' }
+        'UserPromptSubmit' { return 'demo-02-user-prompt-submit.json' }
+        'PreToolUse' { return 'demo-03-pre-tool-use.json' }
+        'PostToolUse' { return 'demo-04-post-tool-use.json' }
+        'PreCompact' { return 'demo-05-pre-compact.json' }
+        'SubagentStart' { return 'demo-06-subagent-start.json' }
+        default { return 'demo-unknown-state.json' }
+    }
+}
+
+function ConvertTo-DemoSanitizedValue {
+    param($Value)
+    $json = ConvertTo-DemoJsonString $Value
+    $maskedJson = Invoke-DemoMask $json
+    try {
+        return $maskedJson | ConvertFrom-Json
+    } catch {
+        return $maskedJson
+    }
+}
+
+function Write-DemoStateLog {
+    param(
+        $HookData,
+        [string]$Summary
+    )
+
+    $logName = Get-DemoStateLogName
+    $relativePath = "logs/$logName"
+    $fullPath = Join-Path (Join-Path $script:DemoCwd 'logs') $logName
+    $payload = ConvertTo-DemoSanitizedValue $HookData
+    $record = [ordered]@{
+        timestamp = Get-DemoTs
+        hookEventName = $script:DemoHookEvent
+        summary = $Summary
+        payload = $payload
+    }
+
+    try {
+        [System.IO.File]::WriteAllText($fullPath, ($record | ConvertTo-Json -Depth 20), [System.Text.UTF8Encoding]::new($false))
+    } catch {
+        $record | ConvertTo-Json -Depth 20 | Set-Content -Path $fullPath -Encoding UTF8
+    }
+
+    Write-DemoDiag "Wrote demo state log: $relativePath"
+    return $relativePath
+}

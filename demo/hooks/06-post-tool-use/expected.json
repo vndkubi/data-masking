@@ -1,6 +1,6 @@
 {
   "hookSpecificOutput": {
     "hookEventName": "PostToolUse",
-    "additionalContext": "SUPPORT DEMO ALERT: The tool 'fetch_webpage' returned customer contact data. Reuse only this sanitized result:\n{\"message\":\"Customer contact is [MASKED-EMAIL]\"}"
+    "additionalContext": "PostToolUse payload was logged to logs/demo-04-post-tool-use.json. Sanitized response preview:\n{\"message\":\"Customer contact is [MASKED-EMAIL]\"}"
   }
 }

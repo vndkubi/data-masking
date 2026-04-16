@@ -2,7 +2,7 @@
 
 Email-first sensitive data masking demo for GitHub Copilot hooks.
 
-This repository is set up as a customer support escalation story: a support agent receives customer data, prepares internal actions, reads ticket context, checks external guidance, and delegates follow-up work. At every stage, raw contact data is rewritten to `[MASKED-EMAIL]` before the model, tools, or sub-agents can rely on it.
+This repository is set up as a simple hook-state demo for GitHub Copilot. Each hook step writes its sanitized input payload to a dedicated log file so you can present the flow clearly: `SessionStart -> UserPromptSubmit -> PreToolUse -> PostToolUse -> PreCompact -> SubagentStart`.
 
 ## What This Demo Covers
 
@@ -15,11 +15,12 @@ The hook wiring is split into one JSON file per event under `.github/hooks/` and
 - `PreCompact`
 - `SubagentStart`
 
-The demo shows three important `PreToolUse` branches separately:
+The main demo goal is simple:
 
-- Automatic masking for normal tool arguments
-- Deny-and-sanitize behavior for `read_file` on sensitive content
-- Confirmation flow before sending sensitive content to external tools
+- Trigger one hook state
+- Open the generated `logs/demo-*.json` file
+- Explain what payload that hook receives
+- Show that sensitive email values are sanitized to `[MASKED-EMAIL]`
 
 ## Active Demo Patterns
 
@@ -140,18 +141,33 @@ See `scripts/demo-hooks/README.md` for the step-by-step presenter view of these 
 
 If a sample matches its expected output, the runner prints `Expected output matched.`
 
+See `.github/hooks/scripts/README.md` for an explanation of what each real `.sh` and `.ps1` hook file does and what output it returns.
+
+## Demo Log Files
+
+Each hook state writes a sanitized payload log into `logs/`:
+
+- `logs/demo-01-session-start.json`
+- `logs/demo-02-user-prompt-submit.json`
+- `logs/demo-03-pre-tool-use.json`
+- `logs/demo-04-post-tool-use.json`
+- `logs/demo-05-pre-compact.json`
+- `logs/demo-06-subagent-start.json`
+
+These files are the center of the simplified demo. After each step runs, open the matching log file and explain the payload for that hook state.
+
 ## Demo Files By Hook
 
 | Step | Purpose |
 |---|---|
-| `demo/hooks/01-session-start` | Show the security policy injected into the session |
-| `demo/hooks/02-user-prompt-submit` | Show prompt masking for email content |
-| `demo/hooks/03-pre-tool-use-mask-input` | Show tool argument masking before execution |
-| `demo/hooks/04-pre-tool-use-read-file` | Show deny-and-sanitize behavior for sensitive file content |
-| `demo/hooks/05-pre-tool-use-external-tool` | Show confirmation before external egress |
-| `demo/hooks/06-post-tool-use` | Show masking of sensitive tool output |
-| `demo/hooks/07-pre-compact` | Show compaction reminder |
-| `demo/hooks/08-subagent-start` | Show inherited masking policy for sub-agents |
+| `demo/hooks/01-session-start` | Log the payload received when a session starts |
+| `demo/hooks/02-user-prompt-submit` | Log the prompt payload after sanitizing email content |
+| `demo/hooks/03-pre-tool-use-mask-input` | Log the tool-call payload before execution |
+| `demo/hooks/04-pre-tool-use-read-file` | Log the `read_file` payload before execution |
+| `demo/hooks/05-pre-tool-use-external-tool` | Log the external-tool payload before execution |
+| `demo/hooks/06-post-tool-use` | Log the payload received after a tool returns data |
+| `demo/hooks/07-pre-compact` | Log the payload received before compaction |
+| `demo/hooks/08-subagent-start` | Log the payload passed to a sub-agent |
 
 ## Tests
 
