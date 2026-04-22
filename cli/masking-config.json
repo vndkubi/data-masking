@@ -1,37 +1,36 @@
 {
+  "externalToolsRegex": "^(search_web|fetch_webpage|mcp_.*|github_repo)$",
+  "sensitiveFilenameRegex": "(^|[\\/])\\d{9,16}(\\.[^\\/]+)?$",
   "patterns": [
     {
-      "name": "Private Key/Certificate",
+      "name": "Private Key",
+      "enabled": true,
       "regex": "-----BEGIN [A-Z ]+KEY-----[\\s\\S]*?-----END [A-Z ]+KEY-----",
-      "regexBash": "-----BEGIN [A-Z ]+KEY-----[^-]*-----END [A-Z ]+KEY-----",
       "replacement": "[MASKED-PRIVATE-KEY]"
     },
     {
-      "name": "Credit Card (BIN-matched, 16 digits)",
-      "description": "Masks exactly 16-digit numbers starting with known BIN prefixes. Add BINs to the binPrefixes array.",
-      "binPrefixes": ["970416", "404169", "520000", "370000", "601100"],
-      "regex": "\\b(970416|404169|520000|370000|601100)\\d{10}\\b",
-      "regexBash": "\\b(970416|404169|520000|370000|601100)[0-9]{10}\\b",
+      "name": "Credit Card",
+      "enabled": true,
+      "regex": "\\b(?:\\d{4}[- ]?){3}\\d{4}\\b",
       "replacement": "[MASKED-CC]"
     },
     {
-      "name": "Credit Card (formatted with BIN)",
-      "regex": "\\b(9704[- ]16|4041[- ]69|5200[- ]00|3700[- ]00|6011[- ]00)[- ]?\\d{4}[- ]\\d{4}\\b",
-      "regexBash": "\\b(9704[- ]16|4041[- ]69|5200[- ]00|3700[- ]00|6011[- ]00)[- ]?[0-9]{4}[- ][0-9]{4}\\b",
-      "replacement": "[MASKED-CC]"
+      "name": "Bearer Token",
+      "enabled": true,
+      "regex": "(?i)Bearer\\s+[A-Za-z0-9._\\-]{10,}",
+      "replacement": "Bearer [MASKED-TOKEN]"
     },
     {
-      "name": "Credit Card (formatted generic)",
-      "regex": "\\b\\d{4}[- ]\\d{4}[- ]\\d{4}[- ]\\d{4}\\b",
-      "regexBash": "\\b[0-9]{4}[- ][0-9]{4}[- ][0-9]{4}[- ][0-9]{4}\\b",
-      "replacement": "[MASKED-CC]"
+      "name": "API Key",
+      "enabled": true,
+      "regex": "(?i)\\b(?:sk|pk|rk|token|api[_-]?key)[-_=: ]*[A-Za-z0-9._\\-]{12,}\\b",
+      "replacement": "[MASKED-KEY]"
     },
     {
-      "name": "Credit Card (formatted generic)",
-      "regex": "\\b\\d{16}\\b",
-      "regexBash": "\\b[0-9]{16}\\b",
-      "replacement": "[MASKED-CC]"
+      "name": "Password Assignment",
+      "enabled": true,
+      "regex": "(?i)\\b(password|passwd|secret|pwd)\\b\\s*[:=]\\s*[^,\\s\"'}]{4,}",
+      "replacement": "$1=[MASKED-PASS]"
     }
-  ],
-  "externalToolsRegex": "^(search_web|fetch_webpage|mcp_.*|github_repo|external_api_call|read_file)$"
+  ]
 }

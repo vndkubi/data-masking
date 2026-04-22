@@ -4,15 +4,7 @@
     "SessionStart": [
       {
         "type": "command",
-        "bash": "$HOME/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "powershell": "& \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
-        "timeoutSec": 15
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "type": "command",
-        "bash": "$HOME/.copilot/hooks/scripts/mask-sensitive-data.sh",
+        "bash": "pwsh -NoLogo -NoProfile -File \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
         "powershell": "& \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
         "timeoutSec": 15
       }
@@ -20,7 +12,7 @@
     "PreToolUse": [
       {
         "type": "command",
-        "bash": "$HOME/.copilot/hooks/scripts/mask-sensitive-data.sh",
+        "bash": "pwsh -NoLogo -NoProfile -File \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
         "powershell": "& \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
         "timeoutSec": 15
       }
@@ -28,15 +20,15 @@
     "PreCompact": [
       {
         "type": "command",
-        "bash": "$HOME/.copilot/hooks/scripts/mask-sensitive-data.sh",
+        "bash": "pwsh -NoLogo -NoProfile -File \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
         "powershell": "& \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
         "timeoutSec": 15
       }
     ],
-    "PostToolUse": [
+    "SubagentStart": [
       {
         "type": "command",
-        "bash": "$HOME/.copilot/hooks/scripts/mask-sensitive-data.sh",
+        "bash": "pwsh -NoLogo -NoProfile -File \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
         "powershell": "& \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
         "timeoutSec": 15
       }
