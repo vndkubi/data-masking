@@ -1,1 +1,0 @@
-[2026-04-22T17:23:01Z] [SessionStart] Skipped: failed to read masking config 'C:\Users\caoth\AppData\Local\Temp\mask-data-invalid-config.json'. Conversion from JSON failed with error: Invalid character after parsing property name. Expected ':' but got: j. Path '', line 1, position 10.
