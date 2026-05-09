@@ -1,0 +1,46 @@
+{
+  "_description": "Minimal sample coverage for the starter masking config.",
+  "cases": [
+    {
+      "id": "CC-01",
+      "name": "Credit card number",
+      "input": "card: 4111111111111111",
+      "expect_masked": true,
+      "expect_output": "card: [MASKED-CC]"
+    },
+    {
+      "id": "KEY-01",
+      "name": "API key sample",
+      "input": "api_key=sk-demo12345678901234567890",
+      "expect_masked": true,
+      "expect_contains": "[MASKED-KEY]"
+    },
+    {
+      "id": "TOKEN-01",
+      "name": "Bearer token sample",
+      "input": "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVC",
+      "expect_masked": true,
+      "expect_contains": "[MASKED-TOKEN]"
+    },
+    {
+      "id": "PASS-01",
+      "name": "Password assignment sample",
+      "input": "password=DemoPass123",
+      "expect_masked": true,
+      "expect_contains": "[MASKED-PASS]"
+    },
+    {
+      "id": "CUSTOM-01",
+      "name": "Custom pattern sample",
+      "input": "customer_id=CUST-123456",
+      "expect_masked": true,
+      "expect_output": "customer_id=[MASKED-CUSTOMER-ID]"
+    },
+    {
+      "id": "SAFE-01",
+      "name": "Normal text stays unchanged",
+      "input": "Hello, this is a normal message with no secrets.",
+      "expect_masked": false
+    }
+  ]
+}

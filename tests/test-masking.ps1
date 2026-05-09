@@ -6,7 +6,7 @@
 #
 # Usage:
 #   .\tests\test-masking.ps1
-#   .\tests\test-masking.ps1 -FixturePath .\tests\fixtures\test-credit-card-bin.json
+#   .\tests\test-masking.ps1 -FixturePath .\tests\fixtures\test-sample-patterns.json
 # =============================================================
 param(
     [string]$FixturePath = "",
@@ -70,6 +70,9 @@ function Invoke-Mask {
     # Also apply customPatterns if present
     if ($config.customPatterns) {
         foreach ($cp in $config.customPatterns) {
+            if ($null -ne $cp.enabled -and $cp.enabled -eq $false) {
+                continue
+            }
             $regex = $cp.regex
             $replacement = if ($cp.replacement) { $cp.replacement } else { $cp.name }
             if ($regex -and $replacement) {

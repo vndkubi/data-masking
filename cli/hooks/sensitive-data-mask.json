@@ -5,7 +5,7 @@
       {
         "type": "command",
         "bash": "pwsh -NoLogo -NoProfile -File \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
-        "powershell": "& \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
+        "powershell": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
         "timeoutSec": 15
       }
     ],
@@ -13,7 +13,7 @@
       {
         "type": "command",
         "bash": "pwsh -NoLogo -NoProfile -File \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
-        "powershell": "& \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
+        "powershell": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
         "timeoutSec": 15
       }
     ],
@@ -21,7 +21,7 @@
       {
         "type": "command",
         "bash": "pwsh -NoLogo -NoProfile -File \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
-        "powershell": "& \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
+        "powershell": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
         "timeoutSec": 15
       }
     ],
@@ -29,7 +29,7 @@
       {
         "type": "command",
         "bash": "pwsh -NoLogo -NoProfile -File \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
-        "powershell": "& \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
+        "powershell": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \"$HOME/.copilot/hooks/scripts/mask-sensitive-data.ps1\"",
         "timeoutSec": 15
       }
     ]

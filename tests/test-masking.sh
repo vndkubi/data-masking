@@ -6,7 +6,7 @@
 #
 # Usage:
 #   bash tests/test-masking.sh
-#   bash tests/test-masking.sh tests/fixtures/test-credit-card-bin.json
+#   bash tests/test-masking.sh tests/fixtures/test-sample-patterns.json
 # =============================================================
 set -euo pipefail
 

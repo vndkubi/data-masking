@@ -1,6 +1,6 @@
 {
-    "cvv": "123",
-    "expiry_month": "12",
-    "expiry_year": "2025",
-    "number": "4111111111111111"
+  "customer_id": "CUST-123456",
+  "card_number": "4111111111111111",
+  "api_key": "sk-demo12345678901234567890",
+  "note": "Sample content for hook masking."
 }

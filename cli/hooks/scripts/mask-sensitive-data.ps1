@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+#Requires -Version 5.1
 
 $ErrorActionPreference = 'Stop'
 
@@ -51,6 +51,49 @@ function Write-HookOutput {
     [Console]::Out.WriteLine(($Payload | ConvertTo-Json -Depth 20 -Compress))
 }
 
+function Write-ContextOutput {
+    param(
+        [string]$HookEvent,
+        [string]$Context
+    )
+
+    Write-HookOutput @{
+        additionalContext  = $Context
+        hookSpecificOutput = @{
+            hookEventName     = $HookEvent
+            additionalContext = $Context
+        }
+    }
+}
+
+function Write-DecisionOutput {
+    param(
+        [string]$HookEvent,
+        [string]$Decision,
+        [string]$Reason,
+        $ModifiedArgs = $null
+    )
+
+    $hookSpecific = @{
+        hookEventName             = $HookEvent
+        permissionDecision        = $Decision
+        permissionDecisionReason  = $Reason
+    }
+
+    $payload = @{
+        permissionDecision        = $Decision
+        permissionDecisionReason  = $Reason
+        hookSpecificOutput        = $hookSpecific
+    }
+
+    if ($null -ne $ModifiedArgs) {
+        $payload['modifiedArgs'] = $ModifiedArgs
+        $hookSpecific['updatedInput'] = $ModifiedArgs
+    }
+
+    Write-HookOutput $payload
+}
+
 function Get-MapValue {
     param(
         [System.Collections.IDictionary]$Map,
@@ -82,19 +125,53 @@ function Copy-Hashtable {
     return $copy
 }
 
-# Convert JSONC-style config into a hashtable. The hook does not embed fallback rules.
+# Windows PowerShell 5.1 lacks ConvertFrom-Json -AsHashtable, so normalize parsed
+# JSON into plain hashtables before the hook logic reads it.
+function ConvertTo-PlainHashtable {
+    param($Value)
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        $map = @{}
+        foreach ($key in $Value.Keys) {
+            $map[$key] = ConvertTo-PlainHashtable -Value $Value[$key]
+        }
+        return $map
+    }
+
+    if ($Value -is [pscustomobject]) {
+        $map = @{}
+        foreach ($property in $Value.PSObject.Properties) {
+            $map[$property.Name] = ConvertTo-PlainHashtable -Value $property.Value
+        }
+        return $map
+    }
+
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        $items = New-Object System.Collections.ArrayList
+        foreach ($item in $Value) {
+            [void]$items.Add((ConvertTo-PlainHashtable -Value $item))
+        }
+        return ,@($items.ToArray())
+    }
+
+    return $Value
+}
+
+# Config must be strict JSON. Disabled rules should use "enabled": false instead
+# of comments so the same file parses in PowerShell 5.1, pwsh, jq, and editors.
 function Read-ConfigFile {
     param([string]$Path)
 
     $content = Get-Content -Path $Path -Raw -Encoding UTF8
-    $content = $content -replace '(?m)^\s*//.*$', ''
-    $content = [regex]::Replace($content, ',(?=\s*[}\]])', '')
-
     if ([string]::IsNullOrWhiteSpace($content)) {
         throw "Config file '$Path' is empty."
     }
 
-    return $content | ConvertFrom-Json -AsHashtable -Depth 20
+    return ConvertTo-PlainHashtable -Value ($content | ConvertFrom-Json)
 }
 
 # Pick the first existing config file in priority order. If it cannot be read, log and skip.
@@ -113,8 +190,8 @@ function Resolve-Config {
     }
 
     if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
-        $candidates += (Join-Path $WorkspaceRoot '.copilot\masking-config.json')
-        $candidates += (Join-Path $WorkspaceRoot '.github\hooks\masking-config.json')
+        $candidates += (Join-Path (Join-Path $WorkspaceRoot '.copilot') 'masking-config.json')
+        $candidates += (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.github') 'hooks') 'masking-config.json')
     }
 
     $candidates += (Join-Path $copilotHome 'masking-config.json')
@@ -131,8 +208,11 @@ function Resolve-Config {
             return $null
         }
 
-        if (-not $config.Contains('patterns') -or $null -eq $config['patterns'] -or @($config['patterns']).Count -eq 0) {
-            Write-Log "[$HookEvent] Skipped: masking config '$candidate' has no patterns."
+        $hasPatterns = $config.Contains('patterns') -and $null -ne $config['patterns'] -and @($config['patterns']).Count -gt 0
+        $hasCustomPatterns = $config.Contains('customPatterns') -and $null -ne $config['customPatterns'] -and @($config['customPatterns']).Count -gt 0
+
+        if (-not $hasPatterns -and -not $hasCustomPatterns) {
+            Write-Log "[$HookEvent] Skipped: masking config '$candidate' has no patterns or customPatterns."
             return $null
         }
 
@@ -169,18 +249,24 @@ function Convert-ToHashtable {
     }
 
     try {
-        return (($Value | ConvertTo-Json -Depth 20 -Compress) | ConvertFrom-Json -AsHashtable -Depth 20)
+        return ConvertTo-PlainHashtable -Value (($Value | ConvertTo-Json -Depth 20 -Compress) | ConvertFrom-Json)
     } catch {
         return @{}
     }
 }
 
-function Get-EnabledPatterns {
-    param([System.Collections.IDictionary]$Config)
+function Get-EnabledPatternsFromGroup {
+    param(
+        [System.Collections.IDictionary]$Config,
+        [string]$GroupName
+    )
 
     $enabledPatterns = @()
+    if (-not $Config.Contains($GroupName) -or $null -eq $Config[$GroupName]) {
+        return $enabledPatterns
+    }
 
-    foreach ($pattern in @($Config['patterns'])) {
+    foreach ($pattern in @($Config[$GroupName])) {
         if ($pattern -isnot [System.Collections.IDictionary]) {
             continue
         }
@@ -197,6 +283,16 @@ function Get-EnabledPatterns {
     }
 
     return $enabledPatterns
+}
+
+function Get-ActivePatterns {
+    param([System.Collections.IDictionary]$Config)
+
+    $allPatterns = @()
+    $allPatterns += @(Get-EnabledPatternsFromGroup -Config $Config -GroupName 'patterns')
+    $allPatterns += @(Get-EnabledPatternsFromGroup -Config $Config -GroupName 'customPatterns')
+
+    return $allPatterns
 }
 
 # Two tiny helpers keep the decision code readable: one checks, one rewrites.
@@ -307,7 +403,12 @@ function Resolve-ToolPath {
 function Get-MaskedTempPath {
     param([string]$SourcePath)
 
-    $hashBytes = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($SourcePath))
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hashBytes = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($SourcePath))
+    } finally {
+        $sha256.Dispose()
+    }
     $hash = ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
     $extension = [System.IO.Path]::GetExtension($SourcePath)
 
@@ -349,13 +450,13 @@ if ([string]::IsNullOrWhiteSpace($rawInput)) {
 }
 
 try {
-    $hookData = $rawInput | ConvertFrom-Json -AsHashtable -Depth 20
+    $hookData = ConvertTo-PlainHashtable -Value ($rawInput | ConvertFrom-Json)
 } catch {
     Write-Log "[unknown] Skipped: hook payload was not valid JSON. $($_.Exception.Message)"
     exit 0
 }
 
-$hookEvent = [string](Get-MapValue -Map $hookData -Keys @('hook_event_name', 'hookEventName'))
+$hookEvent = [string](Get-MapValue -Map $hookData -Keys @('hook_event_name', 'hookEventName', 'eventName', 'event'))
 if ([string]::IsNullOrWhiteSpace($hookEvent)) {
     Write-Log '[unknown] Skipped: hook event name was missing.'
     exit 0
@@ -367,7 +468,7 @@ if ($null -eq $config) {
     exit 0
 }
 
-$patterns = Get-EnabledPatterns -Config $config
+$patterns = Get-ActivePatterns -Config $config
 if ($patterns.Count -eq 0) {
     Write-Log "[$hookEvent] Skipped: config has no enabled patterns."
     exit 0
@@ -378,17 +479,17 @@ $sensitiveFilenameRegex = if ($config.Contains('sensitiveFilenameRegex')) { [str
 
 switch ($hookEvent) {
     'SessionStart' {
-        Write-HookOutput @{ additionalContext = $script:PolicyContext }
+        Write-ContextOutput -HookEvent $hookEvent -Context $script:PolicyContext
         exit 0
     }
 
     'PreCompact' {
-        Write-HookOutput @{ additionalContext = '[SECURITY] Sensitive-data masking is active. Keep only masked placeholders in compacted context.' }
+        Write-ContextOutput -HookEvent $hookEvent -Context '[SECURITY] Sensitive-data masking is active. Keep only masked placeholders in compacted context.'
         exit 0
     }
 
     'SubagentStart' {
-        Write-HookOutput @{ additionalContext = 'SECURITY POLICY (inherited): sensitive-data masking is active. Use only [MASKED-*] placeholders and never reconstruct originals.' }
+        Write-ContextOutput -HookEvent $hookEvent -Context 'SECURITY POLICY (inherited): sensitive-data masking is active. Use only [MASKED-*] placeholders and never reconstruct originals.'
         exit 0
     }
 
@@ -404,19 +505,20 @@ switch ($hookEvent) {
         }
 
         if ([regex]::IsMatch($toolName, $externalToolsRegex, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase) -and (Test-ContainsSensitive -Text $toolInputJson -Patterns $patterns)) {
-            Write-HookOutput @{
-                permissionDecision       = 'ask'
-                permissionDecisionReason = "Sensitive data detected in input to '$toolName'. Confirm before sending it to an external service."
+            $maskedExternalInputJson = Invoke-MaskText -Text $toolInputJson -Patterns $patterns
+            $modifiedExternalArgs = try {
+                ConvertTo-PlainHashtable -Value ($maskedExternalInputJson | ConvertFrom-Json)
+            } catch {
+                $toolInputMap
             }
+
+            Write-DecisionOutput -HookEvent $hookEvent -Decision 'ask' -Reason "Sensitive data detected in input to '$toolName'. The tool arguments were masked; confirm before sending them to an external service." -ModifiedArgs $modifiedExternalArgs
             exit 0
         }
 
         $toolPath = Get-ToolPath -ToolInput $toolInputMap
         if (-not [string]::IsNullOrWhiteSpace($toolPath) -and [regex]::IsMatch($toolPath, $sensitiveFilenameRegex, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
-            Write-HookOutput @{
-                permissionDecision       = 'deny'
-                permissionDecisionReason = 'BLOCKED by security policy: the file path looks like a sensitive numeric filename. Use [MASKED-FILENAME] and rename the file first.'
-            }
+            Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason 'BLOCKED by security policy: the file path looks like a sensitive numeric filename. Use [MASKED-FILENAME] and rename the file first.'
             exit 0
         }
 
@@ -432,19 +534,13 @@ switch ($hookEvent) {
                     if ($toolName -eq 'view') {
                         $maskedPath = Get-MaskedTempPath -SourcePath $resolvedPath
                         Write-Utf8File -Path $maskedPath -Content $maskedContent
+                        $modifiedPathArgs = Update-ToolPath -ToolInput $toolInputMap -NewPath $maskedPath
 
-                        Write-HookOutput @{
-                            permissionDecision       = 'allow'
-                            permissionDecisionReason = 'Sensitive data was detected in file content. The read was redirected to a masked temporary copy.'
-                            modifiedArgs             = (Update-ToolPath -ToolInput $toolInputMap -NewPath $maskedPath)
-                        }
+                        Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason 'Sensitive data was detected in file content. The read was redirected to a masked temporary copy.' -ModifiedArgs $modifiedPathArgs
                         exit 0
                     }
 
-                    Write-HookOutput @{
-                        permissionDecision       = 'deny'
-                        permissionDecisionReason = "SECURITY: file contains sensitive data. Use this masked version only:`n$maskedContent"
-                    }
+                    Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason "SECURITY: file contains sensitive data. Use this masked version only:`n$maskedContent"
                     exit 0
                 }
             }
@@ -453,16 +549,12 @@ switch ($hookEvent) {
         $maskedInputJson = Invoke-MaskText -Text $toolInputJson -Patterns $patterns
         if ($maskedInputJson -ne $toolInputJson) {
             $modifiedArgs = try {
-                $maskedInputJson | ConvertFrom-Json -AsHashtable -Depth 20
+                ConvertTo-PlainHashtable -Value ($maskedInputJson | ConvertFrom-Json)
             } catch {
                 $toolInputMap
             }
 
-            Write-HookOutput @{
-                permissionDecision       = 'allow'
-                permissionDecisionReason = 'Sensitive data was detected and masked before tool execution.'
-                modifiedArgs             = $modifiedArgs
-            }
+            Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason 'Sensitive data was detected and masked before tool execution.' -ModifiedArgs $modifiedArgs
             exit 0
         }
 

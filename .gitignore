@@ -1,1 +1,5 @@
 **/wiremock/**/__files/
+logs/
+.github/hooks/logs/
+cli/logs/
+.github/hooks/.masked-files.json

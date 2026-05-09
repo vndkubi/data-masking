@@ -1,8 +1,8 @@
 # mask-data
 
-A sensitive data masking system for GitHub Copilot AI sessions. Prevents the AI agent from seeing raw sensitive values — credit card numbers, API keys, national IDs, and more — by intercepting and replacing them with `[MASKED-*]` placeholders before they reach the model.
+A sensitive data masking starter kit for GitHub Copilot AI sessions. It prevents the agent from seeing raw sensitive values by intercepting tool input and replacing matched text with `[MASKED-*]` placeholders before execution.
 
-Supports **Linux**, **macOS**, and **WSL** (Windows Subsystem for Linux).
+Supports **Windows**, **macOS**, and **WSL** for Copilot CLI hooks. Windows uses built-in Windows PowerShell 5.1; macOS and WSL use PowerShell 7 (`pwsh`).
 
 ---
 
@@ -14,21 +14,15 @@ Two layers of protection run together:
 Files whose names are purely numeric (9–16 digits, e.g. a card number used as a filename) are temporarily renamed to `masked-<hash>.<ext>` before a Copilot session starts. The original names are stored in a local mapping file and restored when the session ends.
 
 **2. Content masking hooks**
-Copilot agent hooks intercept every relevant event (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PreCompact`, `SubagentStart`) and scan the payload for sensitive patterns. Any match is replaced with a typed placeholder before the data is passed to the model.
+Copilot agent hooks intercept CLI events (`SessionStart`, `PreToolUse`, `PreCompact`, `SubagentStart`) and scan the payload for sensitive patterns. Tool arguments can be denied, redirected to masked temporary files, or rewritten with typed placeholders before execution.
 
-| Sensitive type | Placeholder |
+| Starter sample | Placeholder |
 |---|---|
 | Credit card number | `[MASKED-CC]` |
-| API / secret key | `prefix-[MASKED-KEY]` |
+| API key | `[MASKED-KEY]` |
 | Bearer token | `Bearer [MASKED-TOKEN]` |
-| Credentials in key-value pairs | `[MASKED-PASS]` |
-| AWS access key | `[MASKED-AWS-KEY]` |
-| Vietnamese phone number | `[MASKED-PHONE]` |
-| CMND (national ID) | `[MASKED-ID]` |
-| CCCD (citizen ID) | `[MASKED-CCCD]` |
-| Bank account number | `[MASKED-BANK-ACC]` |
-| CVV / CVC field | `[MASKED-CVV]` |
-| Private key block | `[MASKED-PRIVATE-KEY]` |
+| Password assignment | `[MASKED-PASS]` |
+| Custom demo pattern | `[MASKED-CUSTOMER-ID]` |
 
 ---
 
@@ -38,13 +32,19 @@ Copilot agent hooks intercept every relevant event (`SessionStart`, `UserPromptS
 .github/
   copilot-instructions.md         # AI policy — enforces masked-only rules in every session
   hooks/
-    masking-config.json           # Regex patterns for each sensitive data type
+    masking-config.json           # Starter regex patterns plus customPatterns examples
     sensitive-data-mask.json      # Hook event wiring (which events trigger masking)
+cli/
+  install.ps1                     # Auto setup for the Copilot CLI bundle
+  validate-config.ps1             # Validate regex syntax, JSON shape, duplicate replacements
+  preview-mask.ps1                # Preview masked output from a file or input string
+  masking-config.json             # Strict JSON masking rules copied to ~/.copilot
+  lib/
+    mask-data-tools.ps1           # Shared config and masking helpers for local CLI tools
+  hooks/
+    sensitive-data-mask.json      # CLI hook event wiring
     scripts/
-      mask-sensitive-data.sh      # Hook script (Linux / macOS / WSL)
-      mask-sensitive-data.ps1     # Hook script (Windows native / PowerShell — invoke-* only)
-    logs/
-      hook-debug.log              # Diagnostic log written by the hook scripts
+      mask-sensitive-data.ps1     # Shared masking engine
 scripts/
   invoke-mask.sh                  # Rename sensitive filenames before session (Linux/macOS/WSL)
   invoke-mask.ps1                 # Rename sensitive filenames before session (Windows)
@@ -52,11 +52,11 @@ scripts/
   invoke-restore.ps1              # Restore original filenames after session (Windows)
   verify-mask-sensitive-data.sh   # Verify masking works correctly on a given file
 data/
-  data-sample.json                # Example file with sensitive fields (masked at rest)
+  data-sample.json                # Small example file with a few sample patterns
 wiremock/
   test1/masked-*.json             # WireMock stubs with originally sensitive filenames
   test2/masked-*.json
-logs/                             # Runtime audit logs
+logs/                             # Runtime audit logs (ignored)
 ```
 
 ---
@@ -65,19 +65,12 @@ logs/                             # Runtime audit logs
 
 | Platform | Requirements |
 |---|---|
-| Linux / macOS / WSL | Bash 4+, `jq`, `perl`, `shasum` or `sha1sum` |
-| Windows (invoke-\* scripts only) | PowerShell 5.1 or 7+ |
+| Windows CLI hooks | Windows PowerShell 5.1 |
+| macOS / WSL CLI hooks | PowerShell 7 (`pwsh`) |
+| Legacy Bash helper scripts | Bash 4+, `jq`, `perl`, `shasum` or `sha1sum` |
 | Git operations | Git must be on `PATH` |
 
-Install `jq` if missing:
-
-```bash
-# Ubuntu / WSL
-sudo apt-get install -y jq
-
-# macOS
-brew install jq
-```
+The recommended CLI hook path does not require `jq`, `perl`, Git Bash, or WSL on Windows.
 
 ---
 
@@ -85,17 +78,20 @@ brew install jq
 
 ### Per-repository
 
-Copy the hook files into your project and register them with VS Code Copilot.
+For Copilot CLI, keep the hook wiring and the PowerShell engine in the repository. This project is already wired this way through `.github/hooks/sensitive-data-mask.json`.
 
-**Step 1 — Copy files**
+To copy the same setup into another repository:
 
 ```bash
 # From within your project root
 cp -r /path/to/mask-data/.github .
+mkdir -p cli/hooks/scripts
+cp /path/to/mask-data/cli/hooks/scripts/mask-sensitive-data.ps1 cli/hooks/scripts/
+cp /path/to/mask-data/cli/masking-config.json cli/masking-config.json
 cp -r /path/to/mask-data/scripts .
 ```
 
-Or clone just the relevant files manually:
+Or create these files manually:
 
 ```
 your-project/
@@ -104,114 +100,34 @@ your-project/
     hooks/
       masking-config.json
       sensitive-data-mask.json
+  cli/
+    masking-config.json
+    hooks/
       scripts/
-        mask-sensitive-data.sh
+        mask-sensitive-data.ps1
 ```
 
-**Step 2 — Make script executable**
-
-```bash
-chmod +x .github/hooks/scripts/mask-sensitive-data.sh
-```
-
-**Step 3 — Register hooks in VS Code**
-
-VS Code Copilot automatically discovers hook files from `.github/hooks/*.json` in the workspace root. No further configuration is needed — opening the project in VS Code activates the hooks.
-
-To verify discovery, open the VS Code Output panel → **GitHub Copilot Chat** and start a new session. The `SessionStart` hook will fire and inject the masking policy into the AI context.
+Copilot CLI loads JSON hook files from `.github/hooks/*.json`. The repo-local hook uses Windows PowerShell 5.1 on Windows and `pwsh` on macOS/WSL.
 
 ---
 
 ### Global (all repositories)
 
-Apply masking to every Copilot session on your machine, regardless of which project is open.
+Apply masking to every Copilot CLI session on your machine, regardless of which project is open.
 
-**Step 1 — Create the global hooks directory and copy scripts**
+```powershell
+# Windows PowerShell 5.1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\cli\install.ps1
 
-```bash
-mkdir -p ~/.copilot/hooks/scripts
-
-# Copy the hook script
-cp /path/to/mask-data/.github/hooks/scripts/mask-sensitive-data.sh \
-   ~/.copilot/hooks/scripts/
-
-# Copy the masking config
-cp /path/to/mask-data/.github/hooks/masking-config.json \
-   ~/.copilot/hooks/
-
-chmod +x ~/.copilot/hooks/scripts/mask-sensitive-data.sh
+# macOS / WSL
+pwsh ./cli/install.ps1
 ```
 
-**Step 2 — Create the global hook wiring file**
+The installer creates `~/.copilot/masking-config.json`, `~/.copilot/hooks/sensitive-data-mask.json`, and `~/.copilot/hooks/scripts/mask-sensitive-data.ps1`.
 
-Create `~/.copilot/hooks/global-mask.json`:
+Use `-CopilotHome "$HOME/.copilot-test"` to test the bundle in a separate directory. Existing target files are backed up unless `-NoBackup` is passed.
 
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "type": "command",
-        "command": "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "linux": "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "osx":   "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "timeout": 15
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "type": "command",
-        "command": "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "linux": "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "osx":   "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "timeout": 15
-      }
-    ],
-    "PreToolUse": [
-      {
-        "type": "command",
-        "command": "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "linux": "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "osx":   "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "timeout": 15
-      }
-    ],
-    "PostToolUse": [
-      {
-        "type": "command",
-        "command": "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "linux": "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "osx":   "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "timeout": 15
-      }
-    ],
-    "PreCompact": [
-      {
-        "type": "command",
-        "command": "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "linux": "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "osx":   "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "timeout": 15
-      }
-    ],
-    "SubagentStart": [
-      {
-        "type": "command",
-        "command": "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "linux": "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "osx":   "bash ~/.copilot/hooks/scripts/mask-sensitive-data.sh",
-        "timeout": 15
-      }
-    ]
-  }
-}
-```
-
-> **Note:** The global hook script reads `masking-config.json` from the **project's** `.github/hooks/` directory (via the `cwd` field in the hook payload). If the project has no local config, the hook exits silently without masking. To apply masking in all projects without a local config, the script falls through to its built-in defaults for digit patterns — but for full pattern coverage a local `masking-config.json` is recommended.
-
-**Step 3 — Hook priority**
-
-VS Code Copilot merges hooks from all discovered locations. If a project also has `.github/hooks/sensitive-data-mask.json`, both the global and per-project hooks fire. This is additive — not a conflict.
+Run `.\cli\install.ps1 -Check` when you only want to validate the config before installing.
 
 ---
 
@@ -270,6 +186,34 @@ bash scripts/verify-mask-sensitive-data.sh 'D:\Personal\Projects\mask-data\data\
 
 Output shows the original content, the masked version, and a line-by-line diff of what changed.
 
+### Validate config
+
+Validate JSON shape, regex syntax, and duplicate replacements before installing hooks:
+
+```powershell
+.\cli\validate-config.ps1
+```
+
+Use `-Strict` when warnings should fail the command:
+
+```powershell
+.\cli\validate-config.ps1 -Strict
+```
+
+### Preview masked output
+
+Preview masking for a string:
+
+```powershell
+.\cli\preview-mask.ps1 -Text 'customer_id=CUST-123456 password=DemoPass123'
+```
+
+Preview masking for a file:
+
+```powershell
+.\cli\preview-mask.ps1 -FilePath .\data\data-sample.json
+```
+
 ---
 
 ## Masking patterns
@@ -279,23 +223,19 @@ Patterns are configured in [.github/hooks/masking-config.json](.github/hooks/mas
 | Field | Description |
 |---|---|
 | `name` | Human-readable label |
-| `regex` | Pattern to match (used by both PowerShell and Bash) |
-| `regexBash` | Optional Bash-specific override (e.g. to avoid PCRE syntax unsupported by GNU sed) |
+| `enabled` | Set to `false` to keep a rule in strict JSON without running it |
+| `regex` | .NET regex pattern used by the PowerShell masking engine |
 | `replacement` | Placeholder string (supports `\1` backreferences) |
 
-Built-in patterns cover:
+The default config intentionally stays small. It ships with a few starter examples:
 
-- Credit cards (16-digit and formatted `XXXX-XXXX-XXXX-XXXX`)
-- AWS access keys (`AKIA…`)
-- Generic API / secret keys (`sk-`, `pk-`, `api-`, `token-`, `key-` prefixes)
+- Credit card numbers
+- API keys
 - Bearer tokens
-- Database connection strings (MongoDB, PostgreSQL, MySQL, Redis)
-- Credential key-value pairs (`passwd`, `pwd`, `secret`, `pass` style assignments)
-- Vietnamese national IDs (CMND 9-digit, CCCD 12-digit)
-- Bank account numbers (10–14 digits)
-- Vietnamese phone numbers (`+84` / `0xx`)
-- CVV / CVC fields
-- Private keys / certificates (PEM blocks)
+- Password assignments
+- One custom pattern sample in `customPatterns`
+
+The expected workflow is to replace or extend these with your own regexes.
 
 ### Adding custom patterns
 
@@ -304,9 +244,10 @@ Add an entry to the `customPatterns` array in `masking-config.json`:
 ```json
 "customPatterns": [
   {
-    "name": "My Token",
-    "regex": "(?i)MyToken_[a-zA-Z0-9]{15,}",
-    "replacement": "[MASKED-MY-TOKEN]"
+    "name": "Order ID",
+    "enabled": true,
+    "regex": "(?i)(\"?order_id\"?\\s*[:=]\\s*\"?)ORD-\\d{8}",
+    "replacement": "$1[MASKED-ORDER-ID]"
   }
 ]
 ```
@@ -320,9 +261,7 @@ The masking script is triggered on every hook event listed in [.github/hooks/sen
 | Event | When it fires | What it does |
 |---|---|---|
 | `SessionStart` | Agent session initialises | Injects masking policy into the AI system context |
-| `UserPromptSubmit` | User submits a prompt | Scans and masks sensitive data in the prompt text |
 | `PreToolUse` | Before any tool call | Masks tool arguments; blocks file reads with sensitive paths; asks for confirmation before sending sensitive data to external tools |
-| `PostToolUse` | After any tool call | Masks sensitive data returned in tool results |
 | `PreCompact` | Before context compaction | Reminds the AI to carry only masked values into the compacted context |
 | `SubagentStart` | Before a sub-agent is spawned | Injects masking policy into the sub-agent context |
 
@@ -342,12 +281,12 @@ The [.github/copilot-instructions.md](.github/copilot-instructions.md) instructs
 
 ## Audit logging
 
-The hook scripts write to two log files:
+The hook scripts write runtime logs outside normal source control paths:
 
 | File | Contents |
 |---|---|
-| `logs/copilot-mask-audit.log` | Audit trail of every masking event (event type, tool name, action taken) |
-| `.github/hooks/logs/hook-debug.log` | Low-level diagnostic log (script invocation, raw JSON payloads, config path resolution) |
+| `~/.copilot/logs/mask-sensitive-data.log` | CLI hook skip reasons and runtime diagnostics |
+| `logs/` / `.github/hooks/logs/` | Legacy runtime logs, ignored by `.gitignore` |
 
 Neither log file ever records the original sensitive values — only event metadata and masked placeholders.
 
@@ -422,14 +361,14 @@ The `invoke-mask` / `invoke-restore` scripts must be run manually before and aft
 ### Content masking does not apply inside binary files
 The hook scripts read file contents as plain text. Binary files (images, compiled artifacts, encrypted blobs) are not scanned and are passed through unchanged.
 
-### No support for Windows native (hooks only)
-The hook scripts (`mask-sensitive-data.sh`) require Bash and `jq`. They run on Linux, macOS, and WSL. On Windows native (without WSL), Copilot hooks will not execute. The `invoke-mask.ps1` / `invoke-restore.ps1` scripts for file renaming still work on Windows native.
+### Runtime requirement differs by OS
+Windows native uses Windows PowerShell 5.1. macOS and WSL require PowerShell 7 (`pwsh`) for the CLI hook engine.
 
-### Pattern false positives on numeric sequences
-The digit-range patterns (9-digit CMND, 12-digit CCCD, 10–14-digit bank accounts) can match innocent numeric sequences such as timestamps, version numbers, or IDs in log lines. Review the `masking-config.json` patterns and narrow them if false positives cause issues in your codebase.
+### Pattern false positives
+Any broad regex can mask data you did not intend to hide. Review the starter samples in `masking-config.json` and narrow or replace them for your real data shapes.
 
-### Global hooks require a per-project masking-config.json for full coverage
-When using the global installation, the hook script resolves `masking-config.json` from the active project's `.github/hooks/` directory. Projects without this file will only receive basic built-in digit-pattern masking, not the full pattern set.
+### Config lookup is first-match wins
+The hook reads `MASK_DATA_CONFIG`, then workspace `.copilot/masking-config.json`, then workspace `.github/hooks/masking-config.json`, then global `~/.copilot/masking-config.json`. If the first existing file is invalid JSON, the hook skips and logs the reason instead of falling through.
 
 ### IntelliJ / other IDEs not supported
 VS Code Copilot hooks are a VS Code extension feature. GitHub Copilot in IntelliJ IDEA and other JetBrains IDEs does not support a hook API. This system has no effect in those environments.
