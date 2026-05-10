@@ -129,7 +129,7 @@ Test-JsonFile -Path $targetHookConfig
 
 $runningOnWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
 if (-not $runningOnWindows -and -not (Get-Command pwsh -ErrorAction SilentlyContinue)) {
-    Write-Warning "pwsh was not found on PATH. Install PowerShell 7 on macOS/WSL before using these hooks."
+    Write-Warning "pwsh was not found on PATH. Install PowerShell 7 in the active Linux/macOS/WSL/devcontainer environment before using these hooks."
 }
 
 Write-Host "Installed Copilot CLI masking bundle." -ForegroundColor Green

@@ -1,5 +1,5 @@
 {
-  "customer_id": "CUST-123456",
+  "customer_id": "CUST-1234567",
   "card_number": "4111111111111111",
   "api_key": "sk-demo12345678901234567890",
   "note": "Sample content for hook masking."

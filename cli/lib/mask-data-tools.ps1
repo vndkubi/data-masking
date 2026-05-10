@@ -69,7 +69,7 @@ function Resolve-DefaultMaskDataConfigPath {
         }
     }
 
-    throw "masking-config.json was not found. Use -ConfigPath or create cli/masking-config.json."
+    throw "masking-config.json was not found. Use -ConfigPath or create cli/masking-config.json or .github/hooks/masking-config.json."
 }
 
 function Read-MaskDataConfig {

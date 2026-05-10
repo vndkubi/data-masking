@@ -1,355 +1,567 @@
 #Requires -Version 5.1
-# =============================================================
-# Sensitive Data Masker - Copilot Agent Hook (Windows/PowerShell)
-# Handles: SessionStart, UserPromptSubmit, PreToolUse,
-#           PreCompact, SubagentStart, PostToolUse
-# Platform: Windows PowerShell 5.1+ / PowerShell Core 7+
-# No external dependencies - pure PowerShell (.NET regex)
-# =============================================================
 
-$ErrorActionPreference = "Continue"
+$ErrorActionPreference = 'Stop'
 
-# ==============================================================
-# TIMESTAMP / DIAGNOSTICS
-# ==============================================================
-function Get-Ts {
-    return (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-}
+$script:PolicyContext = @"
+SECURITY POLICY ACTIVE - SENSITIVE DATA MASKING:
+Sensitive data in this session has been automatically masked with [MASKED-*] placeholders.
 
-$ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
-$DiagDir    = Join-Path (Split-Path -Parent $ScriptDir) "logs"
-try { New-Item -ItemType Directory -Force -Path $DiagDir | Out-Null } catch {}
-$DiagFile   = Join-Path $DiagDir "hook-debug.log"
+RULES:
+1. Always use the masked placeholder when referencing sensitive values.
+2. When sending data to any tool or external service, use only the masked version.
+3. Never attempt to recover or reconstruct original sensitive values.
+4. Treat purely numeric filenames with 9-16 digits as [MASKED-FILENAME].
+"@
 
-function Write-DiagLog {
-    param([string]$Message)
-    try { Add-Content -Path $DiagFile -Value "[$(Get-Ts)] $Message" -Encoding UTF8 } catch {}
-}
+$script:LogFile = $null
 
-function Write-AuditLog {
-    param([string]$Event, [string]$Detail)
-    try { Add-Content -Path $script:AuditFile -Value "[$(Get-Ts)] [$Event] $Detail" -Encoding UTF8 } catch {}
-}
+# Keep one small log file under ~/.copilot so the hook can skip quietly but still explain why.
+function Initialize-Log {
+    param([string]$ScriptDir)
 
-Write-DiagLog "Script invoked, ScriptDir=$ScriptDir"
+    $copilotHome = Split-Path -Parent (Split-Path -Parent $ScriptDir)
+    $logDir = Join-Path $copilotHome 'logs'
 
-# ==============================================================
-# READ STDIN
-# ==============================================================
-try {
-    $rawInput = [Console]::In.ReadToEnd()
-} catch {
-    $rawInput = ""
-}
-
-if ([string]::IsNullOrWhiteSpace($rawInput)) {
-    Write-DiagLog "STDIN EMPTY - no hook data received"
-    exit 0
-}
-
-# ==============================================================
-# PARSE JSON INPUT
-# ==============================================================
-try {
-    $hookData = $rawInput | ConvertFrom-Json
-} catch {
-    Write-DiagLog "JSON PARSE FAILED: $_"
-    exit 0
-}
-
-$hookEvent = if ($hookData.hook_event_name) { $hookData.hook_event_name }
-             elseif ($hookData.hookEventName) { $hookData.hookEventName }
-             else { $null }
-
-if (-not $hookEvent) {
-    Write-DiagLog "No hookEventName found in input"
-    exit 0
-}
-
-Write-DiagLog "Hook event: $hookEvent"
-
-# ==============================================================
-# CONFIGURATION
-# ==============================================================
-$cwd = if ($hookData.cwd) { $hookData.cwd } else { "." }
-$configPath = Join-Path $cwd ".github\hooks\masking-config.json"
-$externalToolsRegex = "^(search_web|fetch_webpage|mcp_.*|github_repo)$"
-
-$config = $null
-if (Test-Path $configPath) {
     try {
-        # masking-config.json uses JSONC syntax (// comments + trailing commas).
-        # Strip both before parsing — ConvertFrom-Json requires standard JSON.
-        $rawJson = (Get-Content $configPath -Raw -Encoding UTF8) -replace '(?m)^\s*//.*$', ''
-        # Strip trailing commas before ] or } (JSONC allows them, standard JSON doesn't)
-        $rawJson = [regex]::Replace($rawJson, ',(?=\s*[}\]])', '')
-        $config = $rawJson | ConvertFrom-Json
-        if ($config.externalToolsRegex) {
-            $externalToolsRegex = $config.externalToolsRegex
-        }
+        [System.IO.Directory]::CreateDirectory($logDir) | Out-Null
+        $script:LogFile = Join-Path $logDir 'mask-sensitive-data.log'
     } catch {
-        Write-DiagLog "Failed to load config: $_"
+        $script:LogFile = $null
     }
 }
 
-# Audit log file (set after CWD is known)
-$logDir = Join-Path $cwd "logs"
-try { New-Item -ItemType Directory -Force -Path $logDir | Out-Null } catch {}
-$script:AuditFile = Join-Path $logDir "copilot-mask-audit.log"
+function Write-Log {
+    param([string]$Message)
 
-# ==============================================================
-# MASKING
-# ==============================================================
-function Invoke-MaskSensitive {
-    param([string]$Content)
-    if (-not $config) { return $Content }
+    if ([string]::IsNullOrWhiteSpace($script:LogFile)) {
+        return
+    }
 
-    $result = $Content
+    $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
 
-    if ($config.patterns) {
-        foreach ($pattern in $config.patterns) {
-            if ($null -ne $pattern.enabled -and $pattern.enabled -eq $false) { continue }
-            $rx = if ($pattern.regex) { $pattern.regex } else { $null }
-            if (-not $rx) { continue }
-            $rep = if ($pattern.replacement) { $pattern.replacement }
-                   elseif ($pattern.name)    { $pattern.name }
-                   else                      { continue }
-            try { $result = [regex]::Replace($result, $rx, $rep) } catch {}
+    try {
+        Add-Content -Path $script:LogFile -Value "[$timestamp] $Message" -Encoding UTF8
+    } catch {
+    }
+}
+
+function Write-HookOutput {
+    param([hashtable]$Payload)
+
+    [Console]::Out.WriteLine(($Payload | ConvertTo-Json -Depth 20 -Compress))
+}
+
+function Write-ContextOutput {
+    param(
+        [string]$HookEvent,
+        [string]$Context
+    )
+
+    Write-HookOutput @{
+        additionalContext  = $Context
+        hookSpecificOutput = @{
+            hookEventName     = $HookEvent
+            additionalContext = $Context
+        }
+    }
+}
+
+function Write-DecisionOutput {
+    param(
+        [string]$HookEvent,
+        [string]$Decision,
+        [string]$Reason,
+        $ModifiedArgs = $null
+    )
+
+    $hookSpecific = @{
+        hookEventName             = $HookEvent
+        permissionDecision        = $Decision
+        permissionDecisionReason  = $Reason
+    }
+
+    $payload = @{
+        permissionDecision        = $Decision
+        permissionDecisionReason  = $Reason
+        hookSpecificOutput        = $hookSpecific
+    }
+
+    if ($null -ne $ModifiedArgs) {
+        $payload['modifiedArgs'] = $ModifiedArgs
+        $hookSpecific['updatedInput'] = $ModifiedArgs
+    }
+
+    Write-HookOutput $payload
+}
+
+function Get-MapValue {
+    param(
+        [System.Collections.IDictionary]$Map,
+        [string[]]$Keys,
+        $Default = $null
+    )
+
+    foreach ($key in $Keys) {
+        if ($Map.Contains($key) -and $null -ne $Map[$key]) {
+            return $Map[$key]
         }
     }
 
-    if ($config.customPatterns) {
-        foreach ($cp in $config.customPatterns) {
-            $rx  = $cp.regex
-            $rep = if ($cp.replacement) { $cp.replacement } elseif ($cp.name) { $cp.name } else { $null }
-            if ($rx -and $rep) {
-                try { $result = [regex]::Replace($result, $rx, $rep) } catch {}
+    return $Default
+}
+
+function Copy-Hashtable {
+    param([System.Collections.IDictionary]$Map)
+
+    $copy = @{}
+    if ($null -eq $Map) {
+        return $copy
+    }
+
+    foreach ($key in $Map.Keys) {
+        $copy[$key] = $Map[$key]
+    }
+
+    return $copy
+}
+
+# Windows PowerShell 5.1 lacks ConvertFrom-Json -AsHashtable, so normalize parsed
+# JSON into plain hashtables before the hook logic reads it.
+function ConvertTo-PlainHashtable {
+    param($Value)
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        $map = @{}
+        foreach ($key in $Value.Keys) {
+            $map[$key] = ConvertTo-PlainHashtable -Value $Value[$key]
+        }
+        return $map
+    }
+
+    if ($Value -is [pscustomobject]) {
+        $map = @{}
+        foreach ($property in $Value.PSObject.Properties) {
+            $map[$property.Name] = ConvertTo-PlainHashtable -Value $property.Value
+        }
+        return $map
+    }
+
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        $items = New-Object System.Collections.ArrayList
+        foreach ($item in $Value) {
+            [void]$items.Add((ConvertTo-PlainHashtable -Value $item))
+        }
+        return ,@($items.ToArray())
+    }
+
+    return $Value
+}
+
+# Config must be strict JSON. Disabled rules should use "enabled": false instead
+# of comments so the same file parses in PowerShell 5.1, pwsh, jq, and editors.
+function Read-ConfigFile {
+    param([string]$Path)
+
+    $content = Get-Content -Path $Path -Raw -Encoding UTF8
+    if ([string]::IsNullOrWhiteSpace($content)) {
+        throw "Config file '$Path' is empty."
+    }
+
+    return ConvertTo-PlainHashtable -Value ($content | ConvertFrom-Json)
+}
+
+# Pick the first existing config file in priority order. If it cannot be read, log and skip.
+function Resolve-Config {
+    param(
+        [string]$WorkspaceRoot,
+        [string]$ScriptDir,
+        [string]$HookEvent
+    )
+
+    $copilotHome = Split-Path -Parent (Split-Path -Parent $ScriptDir)
+    $candidates = @()
+
+    if ($env:MASK_DATA_CONFIG) {
+        $candidates += $env:MASK_DATA_CONFIG
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+        $candidates += (Join-Path (Join-Path $WorkspaceRoot '.copilot') 'masking-config.json')
+        $candidates += (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.github') 'hooks') 'masking-config.json')
+    }
+
+    $candidates += (Join-Path $copilotHome 'masking-config.json')
+
+    foreach ($candidate in $candidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate) -or -not (Test-Path $candidate -PathType Leaf)) {
+            continue
+        }
+
+        try {
+            $config = Read-ConfigFile -Path $candidate
+        } catch {
+            Write-Log "[$HookEvent] Skipped: failed to read masking config '$candidate'. $($_.Exception.Message)"
+            return $null
+        }
+
+        $hasPatterns = $config.Contains('patterns') -and $null -ne $config['patterns'] -and @($config['patterns']).Count -gt 0
+        $hasCustomPatterns = $config.Contains('customPatterns') -and $null -ne $config['customPatterns'] -and @($config['customPatterns']).Count -gt 0
+
+        if (-not $hasPatterns -and -not $hasCustomPatterns) {
+            Write-Log "[$HookEvent] Skipped: masking config '$candidate' has no patterns or customPatterns."
+            return $null
+        }
+
+        return $config
+    }
+
+    Write-Log "[$HookEvent] Skipped: masking-config.json was not found in any supported location."
+    return $null
+}
+
+function Convert-ToJsonText {
+    param($Value)
+
+    if ($null -eq $Value) {
+        return '{}'
+    }
+
+    if ($Value -is [string]) {
+        return $Value
+    }
+
+    return ($Value | ConvertTo-Json -Depth 20 -Compress)
+}
+
+function Convert-ToHashtable {
+    param($Value)
+
+    if ($null -eq $Value) {
+        return @{}
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        return (Copy-Hashtable -Map $Value)
+    }
+
+    try {
+        return ConvertTo-PlainHashtable -Value (($Value | ConvertTo-Json -Depth 20 -Compress) | ConvertFrom-Json)
+    } catch {
+        return @{}
+    }
+}
+
+function Get-EnabledPatternsFromGroup {
+    param(
+        [System.Collections.IDictionary]$Config,
+        [string]$GroupName
+    )
+
+    $enabledPatterns = @()
+    if (-not $Config.Contains($GroupName) -or $null -eq $Config[$GroupName]) {
+        return $enabledPatterns
+    }
+
+    foreach ($pattern in @($Config[$GroupName])) {
+        if ($pattern -isnot [System.Collections.IDictionary]) {
+            continue
+        }
+
+        if ($pattern.Contains('enabled') -and $false -eq [bool]$pattern['enabled']) {
+            continue
+        }
+
+        if (-not $pattern.Contains('regex') -or [string]::IsNullOrWhiteSpace([string]$pattern['regex'])) {
+            continue
+        }
+
+        $enabledPatterns += $pattern
+    }
+
+    return $enabledPatterns
+}
+
+function Get-ActivePatterns {
+    param([System.Collections.IDictionary]$Config)
+
+    $allPatterns = @()
+    $allPatterns += @(Get-EnabledPatternsFromGroup -Config $Config -GroupName 'patterns')
+    $allPatterns += @(Get-EnabledPatternsFromGroup -Config $Config -GroupName 'customPatterns')
+
+    return $allPatterns
+}
+
+# Two tiny helpers keep the decision code readable: one checks, one rewrites.
+function Test-ContainsSensitive {
+    param(
+        [string]$Text,
+        [System.Collections.IEnumerable]$Patterns
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return $false
+    }
+
+    foreach ($pattern in $Patterns) {
+        try {
+            if ([regex]::IsMatch($Text, [string]$pattern['regex'])) {
+                return $true
             }
+        } catch {
+        }
+    }
+
+    return $false
+}
+
+function Invoke-MaskText {
+    param(
+        [string]$Text,
+        [System.Collections.IEnumerable]$Patterns
+    )
+
+    $result = $Text
+
+    foreach ($pattern in $Patterns) {
+        $replacement = if ($pattern.Contains('replacement')) {
+            [string]$pattern['replacement']
+        } elseif ($pattern.Contains('name')) {
+            [string]$pattern['name']
+        } else {
+            $null
+        }
+
+        if ([string]::IsNullOrWhiteSpace($replacement)) {
+            continue
+        }
+
+        try {
+            $result = [regex]::Replace($result, [string]$pattern['regex'], $replacement)
+        } catch {
         }
     }
 
     return $result
 }
 
-function Test-HasSensitive {
-    param([string]$Content)
-    if (-not $config) {
-        return [regex]::IsMatch($Content, '[0-9]{16}')
-    }
-    $allPatterns = @()
-    if ($config.patterns)       { $allPatterns += $config.patterns }
-    if ($config.customPatterns) { $allPatterns += $config.customPatterns }
-    foreach ($p in $allPatterns) {
-        if ($null -ne $p.enabled -and $p.enabled -eq $false) { continue }
-        $rx = $p.regex
-        if ($rx) {
-            try { if ([regex]::IsMatch($Content, $rx)) { return $true } } catch {}
+function Get-ToolPath {
+    param([System.Collections.IDictionary]$ToolInput)
+
+    foreach ($key in @('filePath', 'file_path', 'path')) {
+        if ($ToolInput.Contains($key) -and -not [string]::IsNullOrWhiteSpace([string]$ToolInput[$key])) {
+            return [string]$ToolInput[$key]
         }
     }
-    return $false
+
+    return $null
 }
 
-# ==============================================================
-# JSON OUTPUT HELPER
-# ==============================================================
-function Write-JsonOutput {
-    param([hashtable]$Object)
-    $json = $Object | ConvertTo-Json -Depth 10 -Compress
-    [Console]::Out.WriteLine($json)
+function Update-ToolPath {
+    param(
+        [System.Collections.IDictionary]$ToolInput,
+        [string]$NewPath
+    )
+
+    $updated = Copy-Hashtable -Map $ToolInput
+
+    foreach ($key in @('path', 'filePath', 'file_path')) {
+        if ($updated.Contains($key)) {
+            $updated[$key] = $NewPath
+            return $updated
+        }
+    }
+
+    $updated['path'] = $NewPath
+    return $updated
 }
 
-# ==============================================================
-# DISPATCH BY HOOK EVENT
-# ==============================================================
+function Resolve-ToolPath {
+    param(
+        [string]$ToolPath,
+        [string]$WorkspaceRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ToolPath)) {
+        return $null
+    }
+
+    if ([System.IO.Path]::IsPathRooted($ToolPath)) {
+        return $ToolPath
+    }
+
+    if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+        return $ToolPath
+    }
+
+    return (Join-Path $WorkspaceRoot $ToolPath)
+}
+
+function Get-MaskedTempPath {
+    param([string]$SourcePath)
+
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hashBytes = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($SourcePath))
+    } finally {
+        $sha256.Dispose()
+    }
+    $hash = ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
+    $extension = [System.IO.Path]::GetExtension($SourcePath)
+
+    if ([string]::IsNullOrWhiteSpace($extension)) {
+        $extension = '.txt'
+    }
+
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'copilot-mask-cache'
+    [System.IO.Directory]::CreateDirectory($tempRoot) | Out-Null
+
+    return (Join-Path $tempRoot ("masked-$hash$extension"))
+}
+
+function Write-Utf8File {
+    param(
+        [string]$Path,
+        [string]$Content
+    )
+
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $Content, $encoding)
+}
+
+$scriptPath = $MyInvocation.MyCommand.Path
+$scriptDir = Split-Path -Parent $scriptPath
+Initialize-Log -ScriptDir $scriptDir
+
+# Parse stdin first. If the hook payload is broken there is nothing safe to do.
+try {
+    $rawInput = [Console]::In.ReadToEnd()
+} catch {
+    Write-Log '[unknown] Skipped: failed to read hook stdin.'
+    exit 0
+}
+
+if ([string]::IsNullOrWhiteSpace($rawInput)) {
+    Write-Log '[unknown] Skipped: hook stdin was empty.'
+    exit 0
+}
+
+try {
+    $hookData = ConvertTo-PlainHashtable -Value ($rawInput | ConvertFrom-Json)
+} catch {
+    Write-Log "[unknown] Skipped: hook payload was not valid JSON. $($_.Exception.Message)"
+    exit 0
+}
+
+$hookEvent = [string](Get-MapValue -Map $hookData -Keys @('hook_event_name', 'hookEventName', 'eventName', 'event'))
+if ([string]::IsNullOrWhiteSpace($hookEvent)) {
+    Write-Log '[unknown] Skipped: hook event name was missing.'
+    exit 0
+}
+
+$workspaceRoot = [string](Get-MapValue -Map $hookData -Keys @('cwd') -Default '.')
+$config = Resolve-Config -WorkspaceRoot $workspaceRoot -ScriptDir $scriptDir -HookEvent $hookEvent
+if ($null -eq $config) {
+    exit 0
+}
+
+$patterns = Get-ActivePatterns -Config $config
+if ($patterns.Count -eq 0) {
+    Write-Log "[$hookEvent] Skipped: config has no enabled patterns."
+    exit 0
+}
+
+$externalToolsRegex = if ($config.Contains('externalToolsRegex')) { [string]$config['externalToolsRegex'] } else { '^(search_web|fetch_webpage|mcp_.*|github_repo)$' }
+$sensitiveFilenameRegex = if ($config.Contains('sensitiveFilenameRegex')) { [string]$config['sensitiveFilenameRegex'] } else { '(^|[\\/])\d{9,16}(\.[^\\/]+)?$' }
+
 switch ($hookEvent) {
+    'SessionStart' {
+        Write-ContextOutput -HookEvent $hookEvent -Context $script:PolicyContext
+        exit 0
+    }
 
-    "PreToolUse" {
-        $toolName = if ($hookData.tool_name) { $hookData.tool_name }
-                    elseif ($hookData.toolName) { $hookData.toolName }
-                    else { "unknown" }
+    'PreCompact' {
+        Write-ContextOutput -HookEvent $hookEvent -Context '[SECURITY] Sensitive-data masking is active. Keep only masked placeholders in compacted context.'
+        exit 0
+    }
 
-        $toolInputObj = if ($null -ne $hookData.tool_input)  { $hookData.tool_input }
-                        elseif ($null -ne $hookData.toolInput) { $hookData.toolInput }
-                        elseif ($null -ne $hookData.input)     { $hookData.input }
-                        elseif ($null -ne $hookData.toolArgs)  { $hookData.toolArgs }
-                        else { $null }
+    'SubagentStart' {
+        Write-ContextOutput -HookEvent $hookEvent -Context 'SECURITY POLICY (inherited): sensitive-data masking is active. Use only [MASKED-*] placeholders and never reconstruct originals.'
+        exit 0
+    }
 
-        $toolInputStr = if ($toolInputObj) { $toolInputObj | ConvertTo-Json -Depth 10 -Compress } else { "{}" }
+    # All tool decisions live in one branch so the hook flow is easy to inspect.
+    'PreToolUse' {
+        $toolName = [string](Get-MapValue -Map $hookData -Keys @('tool_name', 'toolName') -Default 'unknown')
+        $toolInputValue = Get-MapValue -Map $hookData -Keys @('tool_input', 'toolInput', 'input', 'toolArgs') -Default @{}
+        $toolInputMap = Convert-ToHashtable -Value $toolInputValue
+        $toolInputJson = Convert-ToJsonText -Value $toolInputValue
 
-        $keys = ($hookData | Get-Member -MemberType NoteProperty | Select-Object -ExpandProperty Name) -join ","
-        Write-AuditLog "PreToolUse-Debug" "tool=$toolName, keys=$keys"
+        if ([string]::IsNullOrWhiteSpace($toolInputJson) -or $toolInputJson -eq '{}' -or $toolInputJson -eq 'null') {
+            exit 0
+        }
 
-        if ($toolInputStr -and $toolInputStr -ne "{}" -and $toolInputStr -ne "null") {
+        if ([regex]::IsMatch($toolName, $externalToolsRegex, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase) -and (Test-ContainsSensitive -Text $toolInputJson -Patterns $patterns)) {
+            $maskedExternalInputJson = Invoke-MaskText -Text $toolInputJson -Patterns $patterns
+            $modifiedExternalArgs = try {
+                ConvertTo-PlainHashtable -Value ($maskedExternalInputJson | ConvertFrom-Json)
+            } catch {
+                $toolInputMap
+            }
 
-            # --- Egress Protection ---
-            if ([regex]::IsMatch($toolName, $externalToolsRegex, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
-                if (Test-HasSensitive $toolInputStr) {
-                    Write-AuditLog "PreToolUse (Egress)" "CONFIRM REQUIRED: External tool '$toolName' contains sensitive data."
-                    Write-JsonOutput @{
-                        hookSpecificOutput = @{
-                            hookEventName          = "PreToolUse"
-                            permissionDecision     = "ask"
-                            permissionDecisionReason = "Sensitive data detected in the input to '$toolName'. Do you want to send this data to the external service? If yes, consider whether the data should be masked first."
-                        }
+            Write-DecisionOutput -HookEvent $hookEvent -Decision 'ask' -Reason "Sensitive data detected in input to '$toolName'. The tool arguments were masked; confirm before sending them to an external service." -ModifiedArgs $modifiedExternalArgs
+            exit 0
+        }
+
+        $toolPath = Get-ToolPath -ToolInput $toolInputMap
+        if (-not [string]::IsNullOrWhiteSpace($toolPath) -and [regex]::IsMatch($toolPath, $sensitiveFilenameRegex, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
+            Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason 'BLOCKED by security policy: the file path looks like a sensitive numeric filename. Use [MASKED-FILENAME] and rename the file first.'
+            exit 0
+        }
+
+        if ($toolName -in @('view', 'read_file', 'readFile')) {
+            $resolvedPath = Resolve-ToolPath -ToolPath $toolPath -WorkspaceRoot $workspaceRoot
+
+            if (-not [string]::IsNullOrWhiteSpace($resolvedPath) -and (Test-Path $resolvedPath -PathType Leaf)) {
+                $fileContent = Get-Content -Path $resolvedPath -Raw -Encoding UTF8
+
+                if (Test-ContainsSensitive -Text $fileContent -Patterns $patterns) {
+                    $maskedContent = Invoke-MaskText -Text $fileContent -Patterns $patterns
+
+                    if ($toolName -eq 'view') {
+                        $maskedPath = Get-MaskedTempPath -SourcePath $resolvedPath
+                        Write-Utf8File -Path $maskedPath -Content $maskedContent
+                        $modifiedPathArgs = Update-ToolPath -ToolInput $toolInputMap -NewPath $maskedPath
+
+                        Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason 'Sensitive data was detected in file content. The read was redirected to a masked temporary copy.' -ModifiedArgs $modifiedPathArgs
+                        exit 0
                     }
+
+                    Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason "SECURITY: file contains sensitive data. Use this masked version only:`n$maskedContent"
                     exit 0
                 }
             }
-
-            # --- Strategy 1: DENY file operations with sensitive file paths ---
-            $pathRegex = ""
-            if ($config) {
-                $regexList = @()
-                if ($config.patterns)       { $regexList += $config.patterns       | Where-Object { $_.regex } | ForEach-Object { $_.regex } }
-                if ($config.customPatterns) { $regexList += $config.customPatterns | Where-Object { $_.regex } | ForEach-Object { $_.regex } }
-                $pathRegex = $regexList -join "|"
-            }
-            if (-not $pathRegex) { $pathRegex = '[0-9]{16}' }
-
-            Write-AuditLog "Strategy1-Debug" "tool=$toolName | regex_built=$(if ($pathRegex) {'yes'} else {'no'}) | input_len=$($toolInputStr.Length)"
-
-            try {
-                if ([regex]::IsMatch($toolInputStr, "(filePath|file_path|path|file)[^}]*($pathRegex)", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
-                    Write-AuditLog "PreToolUse" "DENIED: File path with sensitive pattern in tool: $toolName"
-                    Write-JsonOutput @{
-                        hookSpecificOutput = @{
-                            hookEventName            = "PreToolUse"
-                            permissionDecision       = "deny"
-                            permissionDecisionReason = "BLOCKED by security policy: The file path contains a pattern matching sensitive data. Reading or modifying files with PII in the name is not allowed. Please rename the file to remove sensitive identifiers first."
-                        }
-                    }
-                    exit 0
-                }
-            } catch {}
-
-            # --- Strategy 2: PRE-READ file content and deny if sensitive ---
-            if ($toolName -eq "read_file" -or $toolName -eq "readFile") {
-                $filePath = if ($toolInputObj -and $toolInputObj.filePath)   { $toolInputObj.filePath }
-                             elseif ($toolInputObj -and $toolInputObj.file_path) { $toolInputObj.file_path }
-                             elseif ($toolInputObj -and $toolInputObj.path)  { $toolInputObj.path }
-                             else { $null }
-
-                if ($filePath) {
-                    if (-not [System.IO.Path]::IsPathRooted($filePath)) {
-                        $filePath = Join-Path $cwd $filePath
-                    }
-                    if (Test-Path $filePath -PathType Leaf) {
-                        try {
-                            $fileContent = Get-Content $filePath -Raw -Encoding UTF8
-                            if ($fileContent -and (Test-HasSensitive $fileContent)) {
-                                $maskedContent = Invoke-MaskSensitive $fileContent
-                                Write-AuditLog "PreToolUse" "DENIED read_file: sensitive content in $filePath"
-                                Write-JsonOutput @{
-                                    hookSpecificOutput = @{
-                                        hookEventName            = "PreToolUse"
-                                        permissionDecision       = "deny"
-                                        permissionDecisionReason = "SECURITY: File contains sensitive data. Here is the sanitized content:`n$maskedContent`nIMPORTANT: Use ONLY this masked version. Read only masked content."
-                                    }
-                                }
-                                exit 0
-                            }
-                        } catch {}
-                    }
-                }
-            }
-
-            # --- Strategy 3: MASK sensitive data in tool arguments ---
-            $maskedStr = Invoke-MaskSensitive $toolInputStr
-            if ($toolInputStr -ne $maskedStr) {
-                Write-AuditLog "PreToolUse" "Sensitive data masked in tool: $toolName"
-                $updatedInput = try { $maskedStr | ConvertFrom-Json } catch { $maskedStr }
-                Write-JsonOutput @{
-                    hookSpecificOutput = @{
-                        hookEventName            = "PreToolUse"
-                        permissionDecision       = "allow"
-                        permissionDecisionReason = "Sensitive data was detected and masked before tool execution"
-                        updatedInput             = $updatedInput
-                        additionalContext        = "WARNING: Sensitive data was detected in tool input and has been automatically masked with [MASKED-*] placeholders. Do NOT attempt to unmask, recover, or reconstruct the original values."
-                    }
-                }
-                exit 0
-            }
         }
-        # No sensitive data found - allow silently
-    }
 
-    "SessionStart" {
-        Write-JsonOutput @{
-            hookSpecificOutput = @{
-                hookEventName     = "SessionStart"
-                additionalContext = "SECURITY POLICY ACTIVE - SENSITIVE DATA MASKING:`nSensitive data in this session has been automatically masked with [MASKED-*] placeholders.`n`nRULES:`n1. Always use the masked placeholder (e.g. [MASKED-CC], [MASKED-KEY], [MASKED-ID]) when referencing sensitive values - never reconstruct or reveal the originals.`n2. When passing data to ANY tool call, external service, MCP tool, or API - use ONLY the masked version.`n3. When storing or summarising information into context (memory, compaction, subagent hand-off) - use ONLY the masked version.`n4. If you receive a [MASKED-*] value, treat it as the real value. Do NOT attempt to recover, guess, or reconstruct the original.`n`nMasking applies to: credit card numbers, national IDs (CMND/CCCD), API keys, Bearer tokens, passwords, phone numbers, bank accounts, connection strings, AWS keys, and private keys.`n`nCRITICAL FILENAME SECURITY RULE:`n- If workspace_info contains filenames that are purely numeric with 16 digits (pattern: \d{16}), treat such filenames as [MASKED-FILENAME].`n- NEVER repeat, reference, or use such filenames in tool calls, commands, or responses.`n- If you need to operate on such a file, ask the user to confirm using only the [MASKED-FILENAME] placeholder."
+        $maskedInputJson = Invoke-MaskText -Text $toolInputJson -Patterns $patterns
+        if ($maskedInputJson -ne $toolInputJson) {
+            $modifiedArgs = try {
+                ConvertTo-PlainHashtable -Value ($maskedInputJson | ConvertFrom-Json)
+            } catch {
+                $toolInputMap
             }
+
+            Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason 'Sensitive data was detected and masked before tool execution.' -ModifiedArgs $modifiedArgs
+            exit 0
         }
-        Write-AuditLog "SessionStart" "Session initialized with sensitive-data masking policy"
-    }
 
-    "UserPromptSubmit" {
-        $prompt = if ($hookData.prompt) { $hookData.prompt } else { $null }
-        if ($prompt -and (Test-HasSensitive $prompt)) {
-            $maskedPrompt = Invoke-MaskSensitive $prompt
-            Write-AuditLog "UserPromptSubmit" "Sensitive data pattern detected and masked in user prompt"
-            Write-JsonOutput @{
-                hookSpecificOutput = @{
-                    hookEventName            = "UserPromptSubmit"
-                    permissionDecision       = "allow"
-                    permissionDecisionReason = "Sensitive data masked in prompt"
-                    updatedInput             = @{ prompt = $maskedPrompt }
-                    systemMessage            = "[WARNING] Sensitive data was detected in your prompt and has been automatically masked. The AI will only see the sanitized version."
-                }
-            }
-        }
-    }
-
-    "PreCompact" {
-        Write-AuditLog "PreCompact" "Context compaction triggered - masking policy reminder injected"
-        Write-JsonOutput @{
-            systemMessage = "[SECURITY] Pre-compaction reminder: Sensitive data masking is active. Ensure no unmasked credentials, PII, API keys, or confidential data persists in the compacted context."
-        }
-    }
-
-    "SubagentStart" {
-        $agentType = if ($hookData.agent_type) { $hookData.agent_type } else { "unknown" }
-        Write-AuditLog "SubagentStart" "Subagent spawned: $agentType - masking policy injected"
-        Write-JsonOutput @{
-            hookSpecificOutput = @{
-                hookEventName     = "SubagentStart"
-                additionalContext = "SECURITY POLICY (inherited): Sensitive-data masking is active. The following are automatically masked: credit card numbers, API keys, Bearer tokens, passwords, phone numbers, national ID numbers (CMND/CCCD), bank accounts, connection strings, AWS keys, and private keys. All masked values appear as [MASKED-*]. Do NOT attempt to unmask or reconstruct them."
-            }
-        }
-    }
-
-    "PostToolUse" {
-        $toolName = if ($hookData.tool_name) { $hookData.tool_name }
-                    elseif ($hookData.toolName) { $hookData.toolName }
-                    else { "unknown" }
-
-        $toolResponseObj = if ($null -ne $hookData.tool_response)  { $hookData.tool_response }
-                           elseif ($null -ne $hookData.toolResponse) { $hookData.toolResponse }
-                           elseif ($null -ne $hookData.output)       { $hookData.output }
-                           else { $null }
-
-        $keys = ($hookData | Get-Member -MemberType NoteProperty | Select-Object -ExpandProperty Name) -join ","
-        Write-AuditLog "PostToolUse-Debug" "tool=$toolName, keys=$keys"
-
-        if ($null -ne $toolResponseObj) {
-            $toolResponseStr = if ($toolResponseObj -is [string]) { $toolResponseObj }
-                               else { $toolResponseObj | ConvertTo-Json -Depth 10 -Compress }
-            if (Test-HasSensitive $toolResponseStr) {
-                $maskedResponse = Invoke-MaskSensitive $toolResponseStr
-                Write-AuditLog "PostToolUse" "Sensitive data masked in tool response: $toolName"
-                Write-JsonOutput @{
-                    hookSpecificOutput = @{
-                        hookEventName     = "PostToolUse"
-                        additionalContext = "CRITICAL SECURITY ALERT: The tool '$toolName' returned sensitive data. ALL sensitive values have been masked. You MUST use ONLY this sanitized version in your response:`n$maskedResponse`nDo NOT display the original tool output. Display ONLY the masked version above."
-                    }
-                }
-            }
-        }
+        exit 0
     }
 
     default {
-        # Unknown hook event - pass through silently
+        exit 0
     }
 }
-
-exit 0

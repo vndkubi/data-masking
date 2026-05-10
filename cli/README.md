@@ -5,13 +5,15 @@ This is the portable CLI path for installing the masking hook into `~/.copilot`.
 ## Runtime model
 
 - Windows: Windows PowerShell 5.1 via `powershell.exe`.
-- macOS and WSL: PowerShell 7 via `pwsh`.
+- macOS, Linux, WSL, and devcontainers: PowerShell 7 via `pwsh`.
 - No `jq`, `perl`, Python, Git Bash, or WSL is required by the masking engine.
 
 The hook wiring keeps separate shell commands for Unix and Windows:
 
 - `bash`: calls `pwsh`.
 - `powershell`: calls Windows PowerShell 5.1.
+
+If you use a devcontainer, `pwsh` must exist inside the container image itself. A host-side Windows or WSL install does not help because the hook runs in the active container environment.
 
 ## Install
 
@@ -21,7 +23,7 @@ Run the installer from the repo root:
 # Windows PowerShell 5.1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\cli\install.ps1
 
-# macOS / WSL
+# macOS / Linux / WSL
 pwsh ./cli/install.ps1
 ```
 
@@ -78,6 +80,10 @@ Config lookup order at runtime:
 4. `~/.copilot/masking-config.json`
 
 The first existing file wins. If that file is invalid JSON or has no enabled patterns, the hook skips and writes the reason to `~/.copilot/logs/mask-sensitive-data.log`.
+
+## Repo-local bundle
+
+The repository also ships a self-contained `.github/hooks` bundle for per-repo usage. Use `cli/` when you want global install plus the local helper tools, and use `.github/hooks` when you want the hook to live with the repository.
 
 ## Local Tools
 
