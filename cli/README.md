@@ -153,7 +153,7 @@ When multiple patterns match in the same event, the most restrictive configured 
 - `UserPromptSubmit`: by default it emits a best-effort masking hint for the prompt text only; a matched pattern can optionally configure `stop`.
 - `PreToolUse`: the primary mutation and enforcement point. By default it rewrites or redirects inputs; a matched pattern can optionally configure `deny`.
 - `PermissionRequest`: CLI-only advisory layer by default; a matched pattern can optionally configure `deny` or `interrupt`.
-- `PostToolUse` and `PostToolUseFailure`: best-effort leak detection after tool execution. A matched pattern can optionally configure `block` for `PostToolUse`.
+- `PostToolUse` and `PostToolUseFailure`: best-effort leak detection after tool execution. A matched pattern can optionally configure `block` for `PostToolUse`. For file-read tools such as `read_file` and `view`, the hook can re-check the requested file path when the `PostToolUse` payload does not include the tool result body.
 - `PreCompact`: emits a best-effort reminder before compaction.
 - `SubagentStart`: emits the masking policy for spawned agents.
 - `Stop` and `SubagentStop`: rescan the transcript and emit masked guidance by default; a matched pattern can optionally configure `block`.
@@ -162,7 +162,8 @@ When multiple patterns match in the same event, the most restrictive configured 
 The practical behavior split is:
 
 1. `PreToolUse` can still rewrite hook-visible tool input and redirect reads to masked temp files.
-2. Later events are advisory and best-effort only.
+2. `PostToolUse` is later and therefore less reliable for prevention; use `PreToolUse: deny` when the read itself must not happen.
+3. Later events are otherwise advisory and best-effort only.
 3. VS Code attachment contents can already be embedded into the initial model request before any mutable hook sees them.
 
 That last point is a platform limitation: attached file content shown in VS Code debug logs under the initial `llm_request` is not currently interceptable by this hook bundle before it is sent upstream.

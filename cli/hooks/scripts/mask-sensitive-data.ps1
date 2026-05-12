@@ -734,6 +734,56 @@ function Resolve-ToolPath {
     return (Join-Path $WorkspaceRoot $ToolPath)
 }
 
+function Get-ToolReadContent {
+    param(
+        [string]$ToolName,
+        [System.Collections.IDictionary]$ToolInput,
+        [string]$WorkspaceRoot
+    )
+
+    if ($toolName -notin @('view', 'read_file', 'readFile')) {
+        return $null
+    }
+
+    $toolPath = Get-ToolPath -ToolInput $ToolInput
+    $resolvedPath = Resolve-ToolPath -ToolPath $toolPath -WorkspaceRoot $WorkspaceRoot
+    if ([string]::IsNullOrWhiteSpace($resolvedPath) -or -not (Test-Path $resolvedPath -PathType Leaf)) {
+        return $null
+    }
+
+    try {
+        if ($ToolName -eq 'view') {
+            return (Get-Content -Path $resolvedPath -Raw -Encoding UTF8)
+        }
+
+        $lines = @(Get-Content -Path $resolvedPath -Encoding UTF8)
+        if ($lines.Count -eq 0) {
+            return ''
+        }
+
+        $startLine = [int](Get-MapValue -Map $ToolInput -Keys @('startLine', 'start_line') -Default 1)
+        $endLine = [int](Get-MapValue -Map $ToolInput -Keys @('endLine', 'end_line') -Default $startLine)
+
+        if ($startLine -lt 1) {
+            $startLine = 1
+        }
+
+        if ($endLine -lt $startLine) {
+            $endLine = $startLine
+        }
+
+        $startIndex = $startLine - 1
+        if ($startIndex -ge $lines.Count) {
+            return ''
+        }
+
+        $endIndex = [Math]::Min($lines.Count - 1, $endLine - 1)
+        return ($lines[$startIndex..$endIndex] -join "`n")
+    } catch {
+        return $null
+    }
+}
+
 function Get-MaskedTempPath {
     param([string]$SourcePath)
 
@@ -980,11 +1030,19 @@ switch ($hookEvent) {
 
     'PostToolUse' {
         $toolName = [string](Get-MapValue -Map $hookData -Keys @('tool_name', 'toolName') -Default 'unknown')
+        $toolInputValue = Get-MapValue -Map $hookData -Keys @('tool_input', 'toolInput', 'input', 'toolArgs') -Default @{}
+        $toolInputMap = Convert-ToHashtable -Value $toolInputValue
         $toolResultValue = Get-MapValue -Map $hookData -Keys @('tool_result', 'toolResult', 'tool_response', 'toolResponse') -Default $null
+        if (($null -eq $toolResultValue -or [string]::IsNullOrWhiteSpace([string]$toolResultValue)) -and $toolInputMap.Count -gt 0) {
+            $fallbackResult = Get-ToolReadContent -ToolName $toolName -ToolInput $toolInputMap -WorkspaceRoot $workspaceRoot
+            if ($null -ne $fallbackResult) {
+                $toolResultValue = $fallbackResult
+            }
+        }
         $toolResultJson = Convert-ToJsonText -Value $toolResultValue
         $matchedPatterns = Get-MatchedPatterns -Text $toolResultJson -Patterns $patterns
 
-        if ($toolResultJson -ne '{}' -and $toolResultJson -ne 'null' -and $matchedPatterns.Count -gt 0) {
+        if (-not [string]::IsNullOrWhiteSpace($toolResultJson) -and $toolResultJson -ne '{}' -and $toolResultJson -ne 'null' -and $matchedPatterns.Count -gt 0) {
             $maskedResultValue = Invoke-MaskValue -Value $toolResultValue -Patterns $patterns
             $maskedResult = Get-PreviewText -Text (Convert-ToJsonText -Value $maskedResultValue)
             $additionalContext = "SECURITY: '$toolName' returned sensitive data. Continue with this masked result only:`n$maskedResult"
