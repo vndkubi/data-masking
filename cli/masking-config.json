@@ -1,5 +1,5 @@
 {
-  "externalToolsRegex": "^(search_web|fetch_webpage|web_fetch|mcp_.*|github_repo|external_api_call)$",
+  "externalToolsRegex": "^(search_web|fetch_webpage|web_fetch|mcp_.*|github_.*|github_repo|task|bash|powershell|external_api_call)$",
   "sensitiveFilenameRegex": "(^|[\\/])\\d{9,16}(\\.[^\\/]+)?$",
   "patterns": [
     {
@@ -31,7 +31,7 @@
     {
       "name": "Demo Customer ID",
       "enabled": true,
-      "regex": "(?i)(\"?customer_id\"?\\s*[:=]\\s*\"?)CUST-\\d{6}",
+      "regex": "(?i)(\"?customer_id\"?\\s*[:=]\\s*\"?)CUST-\\d{6,}",
       "replacement": "$1[MASKED-CUSTOMER-ID]"
     }
   ]

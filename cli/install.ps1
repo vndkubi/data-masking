@@ -66,25 +66,47 @@ function New-HookConfig {
 
     $bashScriptPath = $ScriptPath -replace '\\', '/'
     $powershellCommand = "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File `"$ScriptPath`""
-    $bashCommand = "pwsh -NoLogo -NoProfile -File `"$bashScriptPath`""
+    $pwshCommand = "pwsh -NoLogo -NoProfile -File `"$bashScriptPath`""
 
     $commandHook = {
         return @{
             type = 'command'
-            bash = $bashCommand
+            bash = $pwshCommand
             powershell = $powershellCommand
+            command = $pwshCommand
             timeoutSec = 15
+            windows = $powershellCommand
+            linux = $pwshCommand
+            osx = $pwshCommand
+            timeout = 15
         }
+    }
+
+    $events = @(
+        'SessionStart',
+        'UserPromptSubmit',
+        'PreToolUse',
+        'PermissionRequest',
+        'PostToolUse',
+        'PostToolUseFailure',
+        'PreCompact',
+        'Stop',
+        'SubagentStart',
+        'SubagentStop',
+        'SessionEnd',
+        'ErrorOccurred',
+        'Notification'
+    )
+
+    $hooks = [ordered]@{}
+    foreach ($event in $events) {
+        $hooks[$event] = @(& $commandHook)
     }
 
     return [ordered]@{
         version = 1
-        hooks = [ordered]@{
-            SessionStart = @(& $commandHook)
-            PreToolUse = @(& $commandHook)
-            PreCompact = @(& $commandHook)
-            SubagentStart = @(& $commandHook)
-        }
+        disableAllHooks = $false
+        hooks = $hooks
     }
 }
 

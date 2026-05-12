@@ -94,6 +94,106 @@ function Write-DecisionOutput {
     Write-HookOutput $payload
 }
 
+function Write-CommonStopOutput {
+    param(
+        [string]$Reason,
+        [string]$SystemMessage
+    )
+
+    Write-HookOutput @{
+        systemMessage = $SystemMessage
+    }
+}
+
+function Write-PostToolUseContextOutput {
+    param(
+        [string]$SystemMessage,
+        [string]$AdditionalContext
+    )
+
+    $payload = @{}
+
+    if (-not [string]::IsNullOrWhiteSpace($SystemMessage)) {
+        $payload['systemMessage'] = $SystemMessage
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($AdditionalContext)) {
+        $payload['hookSpecificOutput'] = @{
+            hookEventName = 'PostToolUse'
+            additionalContext = $AdditionalContext
+        }
+    }
+
+    Write-HookOutput $payload
+}
+
+function Write-StopContextOutput {
+    param(
+        [string]$HookEvent,
+        [string]$SystemMessage,
+        [string]$Reason
+    )
+
+    $payload = @{}
+
+    if (-not [string]::IsNullOrWhiteSpace($SystemMessage)) {
+        $payload['systemMessage'] = $SystemMessage
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Reason)) {
+        $payload['hookSpecificOutput'] = @{
+            hookEventName = $HookEvent
+            additionalContext = $Reason
+        }
+    }
+
+    Write-HookOutput $payload
+}
+
+function Write-PermissionRequestAllow {
+    param([string]$Message)
+
+    $payload = @{
+        behavior = 'allow'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Message)) {
+        $payload['message'] = $Message
+    }
+
+    Write-HookOutput $payload
+}
+
+function Get-PreviewText {
+    param(
+        [string]$Text,
+        [int]$MaxLength = 1200
+    )
+
+    if ([string]::IsNullOrEmpty($Text)) {
+        return ''
+    }
+
+    if ($Text.Length -le $MaxLength) {
+        return $Text
+    }
+
+    return ($Text.Substring(0, $MaxLength) + "`n...[truncated]")
+}
+
+function Get-TranscriptPath {
+    param([System.Collections.IDictionary]$HookData)
+
+    return [string](Get-MapValue -Map $HookData -Keys @('transcript_path', 'transcriptPath'))
+}
+
+function Test-StopHookAlreadyActive {
+    param([System.Collections.IDictionary]$HookData)
+
+    $value = Get-MapValue -Map $HookData -Keys @('stop_hook_active', 'stopHookActive') -Default $false
+    return [bool]$value
+}
+
 function Get-MapValue {
     param(
         [System.Collections.IDictionary]$Map,
@@ -249,9 +349,40 @@ function Convert-ToHashtable {
     }
 
     try {
-        return ConvertTo-PlainHashtable -Value (($Value | ConvertTo-Json -Depth 20 -Compress) | ConvertFrom-Json)
+        $converted = ConvertTo-PlainHashtable -Value (($Value | ConvertTo-Json -Depth 20 -Compress) | ConvertFrom-Json)
+        if ($converted -is [System.Collections.IDictionary]) {
+            return $converted
+        }
     } catch {
-        return @{}
+    }
+
+    return @{}
+}
+
+function Normalize-HookEventName {
+    param([string]$Name)
+
+    if ([string]::IsNullOrWhiteSpace($Name)) {
+        return $null
+    }
+
+    switch ($Name.ToLowerInvariant()) {
+        'sessionstart' { return 'SessionStart' }
+        'sessionend' { return 'SessionEnd' }
+        'userpromptsubmitted' { return 'UserPromptSubmit' }
+        'userpromptsubmit' { return 'UserPromptSubmit' }
+        'pretooluse' { return 'PreToolUse' }
+        'permissionrequest' { return 'PermissionRequest' }
+        'posttooluse' { return 'PostToolUse' }
+        'posttoolusefailure' { return 'PostToolUseFailure' }
+        'precompact' { return 'PreCompact' }
+        'agentstop' { return 'Stop' }
+        'stop' { return 'Stop' }
+        'subagentstart' { return 'SubagentStart' }
+        'subagentstop' { return 'SubagentStop' }
+        'erroroccurred' { return 'ErrorOccurred' }
+        'notification' { return 'Notification' }
+        default { return $Name }
     }
 }
 
@@ -346,6 +477,47 @@ function Invoke-MaskText {
     }
 
     return $result
+}
+
+function Invoke-MaskValue {
+    param(
+        $Value,
+        [System.Collections.IEnumerable]$Patterns
+    )
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    if ($Value -is [string]) {
+        return (Invoke-MaskText -Text $Value -Patterns $Patterns)
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        $maskedMap = @{}
+        foreach ($key in $Value.Keys) {
+            $maskedMap[$key] = Invoke-MaskValue -Value $Value[$key] -Patterns $Patterns
+        }
+        return $maskedMap
+    }
+
+    if ($Value -is [pscustomobject]) {
+        $maskedObject = @{}
+        foreach ($property in $Value.PSObject.Properties) {
+            $maskedObject[$property.Name] = Invoke-MaskValue -Value $property.Value -Patterns $Patterns
+        }
+        return $maskedObject
+    }
+
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        $maskedItems = New-Object System.Collections.ArrayList
+        foreach ($item in $Value) {
+            [void]$maskedItems.Add((Invoke-MaskValue -Value $item -Patterns $Patterns))
+        }
+        return ,@($maskedItems.ToArray())
+    }
+
+    return $Value
 }
 
 function Get-ToolPath {
@@ -456,7 +628,8 @@ try {
     exit 0
 }
 
-$hookEvent = [string](Get-MapValue -Map $hookData -Keys @('hook_event_name', 'hookEventName', 'eventName', 'event'))
+$hookEventRaw = [string](Get-MapValue -Map $hookData -Keys @('hook_event_name', 'hookEventName', 'eventName', 'event'))
+$hookEvent = Normalize-HookEventName -Name $hookEventRaw
 if ([string]::IsNullOrWhiteSpace($hookEvent)) {
     Write-Log '[unknown] Skipped: hook event name was missing.'
     exit 0
@@ -474,7 +647,7 @@ if ($patterns.Count -eq 0) {
     exit 0
 }
 
-$externalToolsRegex = if ($config.Contains('externalToolsRegex')) { [string]$config['externalToolsRegex'] } else { '^(search_web|fetch_webpage|mcp_.*|github_repo)$' }
+$externalToolsRegex = if ($config.Contains('externalToolsRegex')) { [string]$config['externalToolsRegex'] } else { '^(search_web|fetch_webpage|web_fetch|mcp_.*|github_.*|github_repo|task|bash|powershell)$' }
 $sensitiveFilenameRegex = if ($config.Contains('sensitiveFilenameRegex')) { [string]$config['sensitiveFilenameRegex'] } else { '(^|[\\/])\d{9,16}(\.[^\\/]+)?$' }
 
 switch ($hookEvent) {
@@ -483,13 +656,41 @@ switch ($hookEvent) {
         exit 0
     }
 
+    'UserPromptSubmit' {
+        $prompt = [string](Get-MapValue -Map $hookData -Keys @('prompt') -Default '')
+
+        if (Test-ContainsSensitive -Text $prompt -Patterns $patterns) {
+            $maskedPrompt = Get-PreviewText -Text (Invoke-MaskText -Text $prompt -Patterns $patterns)
+            Write-CommonStopOutput -Reason '' -SystemMessage ("Sensitive data detected in the prompt field. Best-effort masked preview:`n$maskedPrompt")
+            exit 0
+        }
+
+        exit 0
+    }
+
     'PreCompact' {
-        Write-ContextOutput -HookEvent $hookEvent -Context '[SECURITY] Sensitive-data masking is active. Keep only masked placeholders in compacted context.'
+        Write-HookOutput @{
+            systemMessage = '[SECURITY] Before compacting context, preserve only masked placeholders. Never compact raw sensitive values.'
+        }
         exit 0
     }
 
     'SubagentStart' {
         Write-ContextOutput -HookEvent $hookEvent -Context 'SECURITY POLICY (inherited): sensitive-data masking is active. Use only [MASKED-*] placeholders and never reconstruct originals.'
+        exit 0
+    }
+
+    'PermissionRequest' {
+        $toolName = [string](Get-MapValue -Map $hookData -Keys @('toolName', 'tool_name') -Default 'unknown')
+        $toolArgsValue = Get-MapValue -Map $hookData -Keys @('toolArgs', 'tool_args', 'tool_input', 'toolInput', 'input') -Default @{}
+        $toolArgsJson = Convert-ToJsonText -Value $toolArgsValue
+
+        if (Test-ContainsSensitive -Text $toolArgsJson -Patterns $patterns) {
+            $maskedArgs = Get-PreviewText -Text (Invoke-MaskText -Text $toolArgsJson -Patterns $patterns)
+            Write-PermissionRequestAllow -Message "Sensitive data detected in permission request for '$toolName'. Best-effort masked preview:`n$maskedArgs"
+            exit 0
+        }
+
         exit 0
     }
 
@@ -504,27 +705,36 @@ switch ($hookEvent) {
             exit 0
         }
 
-        if ([regex]::IsMatch($toolName, $externalToolsRegex, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase) -and (Test-ContainsSensitive -Text $toolInputJson -Patterns $patterns)) {
-            $maskedExternalInputJson = Invoke-MaskText -Text $toolInputJson -Patterns $patterns
-            $modifiedExternalArgs = try {
-                ConvertTo-PlainHashtable -Value ($maskedExternalInputJson | ConvertFrom-Json)
-            } catch {
-                $toolInputMap
-            }
+        $toolPath = Get-ToolPath -ToolInput $toolInputMap
+        $resolvedPath = $null
+        if (-not [string]::IsNullOrWhiteSpace($toolPath)) {
+            $resolvedPath = Resolve-ToolPath -ToolPath $toolPath -WorkspaceRoot $workspaceRoot
+        }
 
-            Write-DecisionOutput -HookEvent $hookEvent -Decision 'ask' -Reason "Sensitive data detected in input to '$toolName'. The tool arguments were masked; confirm before sending them to an external service." -ModifiedArgs $modifiedExternalArgs
+        if ([regex]::IsMatch($toolName, $externalToolsRegex, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase) -and (Test-ContainsSensitive -Text $toolInputJson -Patterns $patterns)) {
+            $modifiedExternalArgs = Convert-ToHashtable -Value (Invoke-MaskValue -Value $toolInputValue -Patterns $patterns)
+
+            Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason "Sensitive data detected in input to '$toolName'. The tool arguments were masked before sending them onward." -ModifiedArgs $modifiedExternalArgs
             exit 0
         }
 
-        $toolPath = Get-ToolPath -ToolInput $toolInputMap
         if (-not [string]::IsNullOrWhiteSpace($toolPath) -and [regex]::IsMatch($toolPath, $sensitiveFilenameRegex, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
-            Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason 'BLOCKED by security policy: the file path looks like a sensitive numeric filename. Use [MASKED-FILENAME] and rename the file first.'
+            if ($toolName -in @('view', 'read_file', 'readFile') -and -not [string]::IsNullOrWhiteSpace($resolvedPath) -and (Test-Path $resolvedPath -PathType Leaf)) {
+                $pathContent = Get-Content -Path $resolvedPath -Raw -Encoding UTF8
+                $maskedPathContent = Invoke-MaskText -Text $pathContent -Patterns $patterns
+                $maskedPath = Get-MaskedTempPath -SourcePath $resolvedPath
+                Write-Utf8File -Path $maskedPath -Content $maskedPathContent
+                $modifiedPathArgs = Update-ToolPath -ToolInput $toolInputMap -NewPath $maskedPath
+
+                Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason 'Sensitive numeric filename was redirected to a masked temporary copy.' -ModifiedArgs $modifiedPathArgs
+                exit 0
+            }
+
+            Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason 'Sensitive numeric filename detected, but no safe replacement path was available. The request was allowed unchanged.'
             exit 0
         }
 
         if ($toolName -in @('view', 'read_file', 'readFile')) {
-            $resolvedPath = Resolve-ToolPath -ToolPath $toolPath -WorkspaceRoot $workspaceRoot
-
             if (-not [string]::IsNullOrWhiteSpace($resolvedPath) -and (Test-Path $resolvedPath -PathType Leaf)) {
                 $fileContent = Get-Content -Path $resolvedPath -Raw -Encoding UTF8
 
@@ -540,21 +750,111 @@ switch ($hookEvent) {
                         exit 0
                     }
 
-                    Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason "SECURITY: file contains sensitive data. Use this masked version only:`n$maskedContent"
+                    $maskedContentPreview = Get-PreviewText -Text $maskedContent
+                    Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason "Sensitive data was detected in file content. Best-effort masked preview:`n$maskedContentPreview"
                     exit 0
                 }
             }
         }
 
-        $maskedInputJson = Invoke-MaskText -Text $toolInputJson -Patterns $patterns
+        $maskedInputValue = Invoke-MaskValue -Value $toolInputValue -Patterns $patterns
+        $maskedInputJson = Convert-ToJsonText -Value $maskedInputValue
         if ($maskedInputJson -ne $toolInputJson) {
-            $modifiedArgs = try {
-                ConvertTo-PlainHashtable -Value ($maskedInputJson | ConvertFrom-Json)
-            } catch {
-                $toolInputMap
-            }
+            $modifiedArgs = Convert-ToHashtable -Value $maskedInputValue
 
             Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason 'Sensitive data was detected and masked before tool execution.' -ModifiedArgs $modifiedArgs
+            exit 0
+        }
+
+        exit 0
+    }
+
+    'PostToolUse' {
+        $toolName = [string](Get-MapValue -Map $hookData -Keys @('tool_name', 'toolName') -Default 'unknown')
+        $toolResultValue = Get-MapValue -Map $hookData -Keys @('tool_result', 'toolResult', 'tool_response', 'toolResponse') -Default $null
+        $toolResultJson = Convert-ToJsonText -Value $toolResultValue
+
+        if ($toolResultJson -ne '{}' -and $toolResultJson -ne 'null' -and (Test-ContainsSensitive -Text $toolResultJson -Patterns $patterns)) {
+            $maskedResultValue = Invoke-MaskValue -Value $toolResultValue -Patterns $patterns
+            $maskedResult = Get-PreviewText -Text (Convert-ToJsonText -Value $maskedResultValue)
+            $additionalContext = "SECURITY: '$toolName' returned sensitive data. Continue with this masked result only:`n$maskedResult"
+            Write-PostToolUseContextOutput -SystemMessage "Sensitive data appeared in result from '$toolName'. A masked preview was generated." -AdditionalContext $additionalContext
+            exit 0
+        }
+
+        exit 0
+    }
+
+    'PostToolUseFailure' {
+        $payloadJson = Convert-ToJsonText -Value $hookData
+
+        if (Test-ContainsSensitive -Text $payloadJson -Patterns $patterns) {
+            $maskedPayload = Get-PreviewText -Text (Convert-ToJsonText -Value (Invoke-MaskValue -Value $hookData -Patterns $patterns))
+            Write-ContextOutput -HookEvent $hookEvent -Context "SECURITY: failure payload contained sensitive data. Use only this masked payload:`n$maskedPayload"
+            exit 0
+        }
+
+        exit 0
+    }
+
+    'Stop' {
+        if (Test-StopHookAlreadyActive -HookData $hookData) {
+            exit 0
+        }
+
+        $transcriptPath = Get-TranscriptPath -HookData $hookData
+        if (-not [string]::IsNullOrWhiteSpace($transcriptPath) -and (Test-Path $transcriptPath -PathType Leaf)) {
+            $transcript = Get-Content -Path $transcriptPath -Raw -Encoding UTF8
+
+            if (Test-ContainsSensitive -Text $transcript -Patterns $patterns) {
+                $maskedTranscript = Get-PreviewText -Text (Invoke-MaskText -Text $transcript -Patterns $patterns)
+                Write-StopContextOutput -HookEvent $hookEvent -SystemMessage 'Sensitive data detected before stop. Best-effort masked transcript preview generated.' -Reason ("SECURITY: use masked placeholders only. Preview:`n$maskedTranscript")
+                exit 0
+            }
+        }
+
+        exit 0
+    }
+
+    'SubagentStop' {
+        if (Test-StopHookAlreadyActive -HookData $hookData) {
+            exit 0
+        }
+
+        $transcriptPath = Get-TranscriptPath -HookData $hookData
+        if (-not [string]::IsNullOrWhiteSpace($transcriptPath) -and (Test-Path $transcriptPath -PathType Leaf)) {
+            $transcript = Get-Content -Path $transcriptPath -Raw -Encoding UTF8
+
+            if (Test-ContainsSensitive -Text $transcript -Patterns $patterns) {
+                $maskedTranscript = Get-PreviewText -Text (Invoke-MaskText -Text $transcript -Patterns $patterns)
+                Write-StopContextOutput -HookEvent $hookEvent -SystemMessage 'Sensitive data detected in subagent transcript. Best-effort masked preview generated.' -Reason ("SECURITY: use masked placeholders only. Preview:`n$maskedTranscript")
+                exit 0
+            }
+        }
+
+        exit 0
+    }
+
+    'SessionEnd' {
+        Write-Log "[$hookEvent] Session ended."
+        exit 0
+    }
+
+    'ErrorOccurred' {
+        $payloadJson = Convert-ToJsonText -Value $hookData
+        $maskedPayload = Get-PreviewText -Text (Invoke-MaskText -Text $payloadJson -Patterns $patterns)
+        Write-Log "[$hookEvent] $maskedPayload"
+        exit 0
+    }
+
+    'Notification' {
+        $message = [string](Get-MapValue -Map $hookData -Keys @('message') -Default '')
+
+        if (Test-ContainsSensitive -Text $message -Patterns $patterns) {
+            $maskedMessage = Get-PreviewText -Text (Invoke-MaskText -Text $message -Patterns $patterns)
+            Write-HookOutput @{
+                additionalContext = "SECURITY: notification contained sensitive data. Use only this masked message:`n$maskedMessage"
+            }
             exit 0
         }
 

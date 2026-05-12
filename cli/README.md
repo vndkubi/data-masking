@@ -67,7 +67,7 @@ Do not comment out patterns. Disable a rule with:
 {
   "name": "Demo Customer ID",
   "enabled": false,
-  "regex": "(?i)(\"?customer_id\"?\\s*[:=]\\s*\"?)CUST-\\d{6}",
+  "regex": "(?i)(\"?customer_id\"?\\s*[:=]\\s*\"?)CUST-\\d{6,}",
   "replacement": "$1[MASKED-CUSTOMER-ID]"
 }
 ```
@@ -114,8 +114,19 @@ Preview masking against a file:
 ## Hook Behavior
 
 - `SessionStart`: emits the masking policy context.
-- `PreToolUse`: asks, denies, redirects, or rewrites tool args when sensitive data is found.
-- `PreCompact`: emits a reminder to keep only masked placeholders.
+- `UserPromptSubmit`: best-effort masking hint for the prompt text only. It does not block the session.
+- `PreToolUse`: the primary mutation and enforcement point. It asks, denies, redirects, or rewrites tool args when sensitive data is found.
+- `PermissionRequest`: CLI-only best-effort advisory layer. It no longer denies for masking alone.
+- `PostToolUse` and `PostToolUseFailure`: best-effort leak detection after tool execution. They add masked context but do not block for masking alone.
+- `PreCompact`: emits a best-effort reminder before compaction.
 - `SubagentStart`: emits the masking policy for spawned agents.
+- `Stop` and `SubagentStop`: rescan the transcript and emit masked guidance without blocking completion.
+- `SessionEnd`, `ErrorOccurred`, and `Notification`: provide cleanup, diagnostics, or additional masked context where supported.
 
-`UserPromptSubmit` is intentionally not wired for CLI because current Copilot CLI docs mark `userPromptSubmitted` output as not processed. Masking protection is therefore enforced at tool boundaries.
+The practical behavior split is:
+
+1. `PreToolUse` can still rewrite hook-visible tool input and redirect reads to masked temp files.
+2. Later events are advisory and best-effort only.
+3. VS Code attachment contents can already be embedded into the initial model request before any mutable hook sees them.
+
+That last point is a platform limitation: attached file content shown in VS Code debug logs under the initial `llm_request` is not currently interceptable by this hook bundle before it is sent upstream.
