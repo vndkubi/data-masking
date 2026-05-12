@@ -24,7 +24,11 @@
       "name": "Password Assignment",
       "enabled": true,
       "regex": "(?i)\\b(password|passwd|secret|pwd)\\b\\s*[:=]\\s*[^,\\s\"'}]{4,}",
-      "replacement": "$1=[MASKED-PASS]"
+      "replacement": "$1=[MASKED-PASS]",
+      "enforcement": {
+        "UserPromptSubmit": "stop",
+        "PreToolUse": "deny"
+      }
     }
   ],
   "customPatterns": [

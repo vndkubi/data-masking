@@ -89,6 +89,37 @@ function Read-MaskDataConfig {
     return $config
 }
 
+function Normalize-MaskDataHookEventName {
+    param([string]$Name)
+
+    if ([string]::IsNullOrWhiteSpace($Name)) {
+        return $null
+    }
+
+    switch ($Name.ToLowerInvariant()) {
+        'userpromptsubmit' { return 'UserPromptSubmit' }
+        'userpromptsubmitted' { return 'UserPromptSubmit' }
+        'pretooluse' { return 'PreToolUse' }
+        'permissionrequest' { return 'PermissionRequest' }
+        'posttooluse' { return 'PostToolUse' }
+        'stop' { return 'Stop' }
+        'agentstop' { return 'Stop' }
+        'subagentstop' { return 'SubagentStop' }
+        default { return $Name }
+    }
+}
+
+function Get-MaskDataSupportedEnforcementActions {
+    return @{
+        UserPromptSubmit = @('mask', 'stop')
+        PreToolUse = @('mask', 'deny')
+        PermissionRequest = @('mask', 'deny', 'interrupt')
+        PostToolUse = @('mask', 'block')
+        Stop = @('mask', 'block')
+        SubagentStop = @('mask', 'block')
+    }
+}
+
 function Get-MaskDataPatternEntries {
     param([System.Collections.IDictionary]$Config)
 
@@ -259,6 +290,34 @@ function Test-MaskDataConfig {
 
         if ([string]::IsNullOrWhiteSpace($replacement)) {
             [void]$errors.Add("$displayName must define 'replacement' or 'name'.")
+        }
+
+        if ($entry.Pattern.Contains('enforcement') -and $null -ne $entry.Pattern['enforcement']) {
+            $supportedEnforcement = Get-MaskDataSupportedEnforcementActions
+            $enforcement = $entry.Pattern['enforcement']
+
+            if ($enforcement -isnot [System.Collections.IDictionary]) {
+                [void]$errors.Add("$displayName enforcement must be a JSON object.")
+            } else {
+                foreach ($eventKey in $enforcement.Keys) {
+                    $normalizedEvent = Normalize-MaskDataHookEventName -Name ([string]$eventKey)
+                    if (-not $supportedEnforcement.Contains($normalizedEvent)) {
+                        [void]$errors.Add("$displayName enforcement uses unsupported event '$eventKey'.")
+                        continue
+                    }
+
+                    $action = [string]$enforcement[$eventKey]
+                    if ([string]::IsNullOrWhiteSpace($action)) {
+                        [void]$errors.Add("$displayName enforcement for '$normalizedEvent' must be a non-empty string.")
+                        continue
+                    }
+
+                    if ($action -notin $supportedEnforcement[$normalizedEvent]) {
+                        $allowedActions = ($supportedEnforcement[$normalizedEvent] -join ', ')
+                        [void]$errors.Add("$displayName enforcement action '$action' is invalid for '$normalizedEvent'. Allowed: $allowedActions")
+                    }
+                }
+            }
         }
 
         if ($enabled) {

@@ -100,18 +100,32 @@ function Write-CommonStopOutput {
         [string]$SystemMessage
     )
 
-    Write-HookOutput @{
+    $payload = @{
         systemMessage = $SystemMessage
     }
+
+    if (-not [string]::IsNullOrWhiteSpace($Reason)) {
+        $payload['continue'] = $false
+        $payload['stopReason'] = $Reason
+    }
+
+    Write-HookOutput $payload
 }
 
 function Write-PostToolUseContextOutput {
     param(
         [string]$SystemMessage,
-        [string]$AdditionalContext
+        [string]$AdditionalContext,
+        [switch]$Block,
+        [string]$Reason
     )
 
     $payload = @{}
+
+    if ($Block) {
+        $payload['decision'] = 'block'
+        $payload['reason'] = $Reason
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($SystemMessage)) {
         $payload['systemMessage'] = $SystemMessage
@@ -131,7 +145,8 @@ function Write-StopContextOutput {
     param(
         [string]$HookEvent,
         [string]$SystemMessage,
-        [string]$Reason
+        [string]$Reason,
+        [switch]$Block
     )
 
     $payload = @{}
@@ -140,7 +155,13 @@ function Write-StopContextOutput {
         $payload['systemMessage'] = $SystemMessage
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($Reason)) {
+    if ($Block) {
+        $payload['hookSpecificOutput'] = @{
+            hookEventName = $HookEvent
+            decision = 'block'
+            reason = $Reason
+        }
+    } elseif (-not [string]::IsNullOrWhiteSpace($Reason)) {
         $payload['hookSpecificOutput'] = @{
             hookEventName = $HookEvent
             additionalContext = $Reason
@@ -159,6 +180,28 @@ function Write-PermissionRequestAllow {
 
     if (-not [string]::IsNullOrWhiteSpace($Message)) {
         $payload['message'] = $Message
+    }
+
+    Write-HookOutput $payload
+}
+
+function Write-PermissionRequestDecision {
+    param(
+        [string]$Behavior,
+        [string]$Message,
+        [switch]$Interrupt
+    )
+
+    $payload = @{
+        behavior = $Behavior
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Message)) {
+        $payload['message'] = $Message
+    }
+
+    if ($Interrupt) {
+        $payload['interrupt'] = $true
     }
 
     Write-HookOutput $payload
@@ -520,6 +563,125 @@ function Invoke-MaskValue {
     return $Value
 }
 
+function Get-MatchedPatterns {
+    param(
+        [string]$Text,
+        [System.Collections.IEnumerable]$Patterns
+    )
+
+    $matchedPatterns = @()
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return $matchedPatterns
+    }
+
+    foreach ($pattern in $Patterns) {
+        try {
+            if ([regex]::IsMatch($Text, [string]$pattern['regex'])) {
+                $matchedPatterns += $pattern
+            }
+        } catch {
+        }
+    }
+
+    return $matchedPatterns
+}
+
+function Get-PatternDisplayNames {
+    param([System.Collections.IEnumerable]$Patterns)
+
+    $names = @()
+    foreach ($pattern in $Patterns) {
+        if ($pattern -isnot [System.Collections.IDictionary]) {
+            continue
+        }
+
+        if ($pattern.Contains('name') -and -not [string]::IsNullOrWhiteSpace([string]$pattern['name'])) {
+            $names += [string]$pattern['name']
+        }
+    }
+
+    return @($names | Select-Object -Unique)
+}
+
+function Get-EventActionPriority {
+    param(
+        [string]$HookEvent,
+        [string]$Action
+    )
+
+    switch ($HookEvent) {
+        'UserPromptSubmit' {
+            switch ($Action) {
+                'mask' { return 0 }
+                'stop' { return 1 }
+            }
+        }
+        'PreToolUse' {
+            switch ($Action) {
+                'mask' { return 0 }
+                'deny' { return 1 }
+            }
+        }
+        'PermissionRequest' {
+            switch ($Action) {
+                'mask' { return 0 }
+                'deny' { return 1 }
+                'interrupt' { return 2 }
+            }
+        }
+        'PostToolUse' {
+            switch ($Action) {
+                'mask' { return 0 }
+                'block' { return 1 }
+            }
+        }
+        'Stop' {
+            switch ($Action) {
+                'mask' { return 0 }
+                'block' { return 1 }
+            }
+        }
+        'SubagentStop' {
+            switch ($Action) {
+                'mask' { return 0 }
+                'block' { return 1 }
+            }
+        }
+    }
+
+    return -1
+}
+
+function Resolve-EnforcementAction {
+    param(
+        [string]$HookEvent,
+        [System.Collections.IEnumerable]$MatchedPatterns
+    )
+
+    $selectedAction = 'mask'
+    $selectedPriority = 0
+
+    foreach ($pattern in $MatchedPatterns) {
+        if ($pattern -isnot [System.Collections.IDictionary] -or -not $pattern.Contains('enforcement') -or $null -eq $pattern['enforcement']) {
+            continue
+        }
+
+        $enforcement = $pattern['enforcement']
+        if ($enforcement -isnot [System.Collections.IDictionary] -or -not $enforcement.Contains($HookEvent)) {
+            continue
+        }
+
+        $candidateAction = [string]$enforcement[$HookEvent]
+        $candidatePriority = Get-EventActionPriority -HookEvent $HookEvent -Action $candidateAction
+        if ($candidatePriority -gt $selectedPriority) {
+            $selectedAction = $candidateAction
+            $selectedPriority = $candidatePriority
+        }
+    }
+
+    return $selectedAction
+}
+
 function Get-ToolPath {
     param([System.Collections.IDictionary]$ToolInput)
 
@@ -658,9 +820,18 @@ switch ($hookEvent) {
 
     'UserPromptSubmit' {
         $prompt = [string](Get-MapValue -Map $hookData -Keys @('prompt') -Default '')
+        $matchedPatterns = Get-MatchedPatterns -Text $prompt -Patterns $patterns
 
-        if (Test-ContainsSensitive -Text $prompt -Patterns $patterns) {
+        if ($matchedPatterns.Count -gt 0) {
+            $matchedPatternNames = (Get-PatternDisplayNames -Patterns $matchedPatterns) -join ', '
             $maskedPrompt = Get-PreviewText -Text (Invoke-MaskText -Text $prompt -Patterns $patterns)
+            $action = Resolve-EnforcementAction -HookEvent $hookEvent -MatchedPatterns $matchedPatterns
+
+            if ($action -eq 'stop') {
+                Write-CommonStopOutput -Reason "Sensitive patterns detected in user prompt: $matchedPatternNames" -SystemMessage ("Sensitive data detected in the prompt field. Masked preview:`n$maskedPrompt")
+                exit 0
+            }
+
             Write-CommonStopOutput -Reason '' -SystemMessage ("Sensitive data detected in the prompt field. Best-effort masked preview:`n$maskedPrompt")
             exit 0
         }
@@ -684,9 +855,23 @@ switch ($hookEvent) {
         $toolName = [string](Get-MapValue -Map $hookData -Keys @('toolName', 'tool_name') -Default 'unknown')
         $toolArgsValue = Get-MapValue -Map $hookData -Keys @('toolArgs', 'tool_args', 'tool_input', 'toolInput', 'input') -Default @{}
         $toolArgsJson = Convert-ToJsonText -Value $toolArgsValue
+        $matchedPatterns = Get-MatchedPatterns -Text $toolArgsJson -Patterns $patterns
 
-        if (Test-ContainsSensitive -Text $toolArgsJson -Patterns $patterns) {
+        if ($matchedPatterns.Count -gt 0) {
+            $matchedPatternNames = (Get-PatternDisplayNames -Patterns $matchedPatterns) -join ', '
             $maskedArgs = Get-PreviewText -Text (Invoke-MaskText -Text $toolArgsJson -Patterns $patterns)
+            $action = Resolve-EnforcementAction -HookEvent $hookEvent -MatchedPatterns $matchedPatterns
+
+            if ($action -eq 'interrupt') {
+                Write-PermissionRequestDecision -Behavior 'deny' -Message "Sensitive patterns detected in permission request for '$toolName': $matchedPatternNames. Masked preview:`n$maskedArgs" -Interrupt
+                exit 0
+            }
+
+            if ($action -eq 'deny') {
+                Write-PermissionRequestDecision -Behavior 'deny' -Message "Sensitive patterns detected in permission request for '$toolName': $matchedPatternNames. Masked preview:`n$maskedArgs"
+                exit 0
+            }
+
             Write-PermissionRequestAllow -Message "Sensitive data detected in permission request for '$toolName'. Best-effort masked preview:`n$maskedArgs"
             exit 0
         }
@@ -700,6 +885,7 @@ switch ($hookEvent) {
         $toolInputValue = Get-MapValue -Map $hookData -Keys @('tool_input', 'toolInput', 'input', 'toolArgs') -Default @{}
         $toolInputMap = Convert-ToHashtable -Value $toolInputValue
         $toolInputJson = Convert-ToJsonText -Value $toolInputValue
+        $matchedInputPatterns = Get-MatchedPatterns -Text $toolInputJson -Patterns $patterns
 
         if ([string]::IsNullOrWhiteSpace($toolInputJson) -or $toolInputJson -eq '{}' -or $toolInputJson -eq 'null') {
             exit 0
@@ -711,8 +897,15 @@ switch ($hookEvent) {
             $resolvedPath = Resolve-ToolPath -ToolPath $toolPath -WorkspaceRoot $workspaceRoot
         }
 
-        if ([regex]::IsMatch($toolName, $externalToolsRegex, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase) -and (Test-ContainsSensitive -Text $toolInputJson -Patterns $patterns)) {
+        if ([regex]::IsMatch($toolName, $externalToolsRegex, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase) -and $matchedInputPatterns.Count -gt 0) {
             $modifiedExternalArgs = Convert-ToHashtable -Value (Invoke-MaskValue -Value $toolInputValue -Patterns $patterns)
+            $action = Resolve-EnforcementAction -HookEvent $hookEvent -MatchedPatterns $matchedInputPatterns
+            $matchedPatternNames = (Get-PatternDisplayNames -Patterns $matchedInputPatterns) -join ', '
+
+            if ($action -eq 'deny') {
+                Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason "Sensitive patterns detected in input to '$toolName': $matchedPatternNames. Tool execution was denied."
+                exit 0
+            }
 
             Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason "Sensitive data detected in input to '$toolName'. The tool arguments were masked before sending them onward." -ModifiedArgs $modifiedExternalArgs
             exit 0
@@ -737,9 +930,18 @@ switch ($hookEvent) {
         if ($toolName -in @('view', 'read_file', 'readFile')) {
             if (-not [string]::IsNullOrWhiteSpace($resolvedPath) -and (Test-Path $resolvedPath -PathType Leaf)) {
                 $fileContent = Get-Content -Path $resolvedPath -Raw -Encoding UTF8
+                $matchedFilePatterns = Get-MatchedPatterns -Text $fileContent -Patterns $patterns
 
-                if (Test-ContainsSensitive -Text $fileContent -Patterns $patterns) {
+                if ($matchedFilePatterns.Count -gt 0) {
                     $maskedContent = Invoke-MaskText -Text $fileContent -Patterns $patterns
+                    $matchedPatternNames = (Get-PatternDisplayNames -Patterns $matchedFilePatterns) -join ', '
+                    $action = Resolve-EnforcementAction -HookEvent $hookEvent -MatchedPatterns $matchedFilePatterns
+
+                    if ($action -eq 'deny') {
+                        $maskedContentPreview = Get-PreviewText -Text $maskedContent
+                        Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason "Sensitive patterns detected in file content: $matchedPatternNames. Masked preview:`n$maskedContentPreview"
+                        exit 0
+                    }
 
                     if ($toolName -eq 'view') {
                         $maskedPath = Get-MaskedTempPath -SourcePath $resolvedPath
@@ -761,6 +963,13 @@ switch ($hookEvent) {
         $maskedInputJson = Convert-ToJsonText -Value $maskedInputValue
         if ($maskedInputJson -ne $toolInputJson) {
             $modifiedArgs = Convert-ToHashtable -Value $maskedInputValue
+            $action = Resolve-EnforcementAction -HookEvent $hookEvent -MatchedPatterns $matchedInputPatterns
+            $matchedPatternNames = (Get-PatternDisplayNames -Patterns $matchedInputPatterns) -join ', '
+
+            if ($action -eq 'deny') {
+                Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason "Sensitive patterns detected in tool input: $matchedPatternNames. Tool execution was denied."
+                exit 0
+            }
 
             Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason 'Sensitive data was detected and masked before tool execution.' -ModifiedArgs $modifiedArgs
             exit 0
@@ -773,11 +982,20 @@ switch ($hookEvent) {
         $toolName = [string](Get-MapValue -Map $hookData -Keys @('tool_name', 'toolName') -Default 'unknown')
         $toolResultValue = Get-MapValue -Map $hookData -Keys @('tool_result', 'toolResult', 'tool_response', 'toolResponse') -Default $null
         $toolResultJson = Convert-ToJsonText -Value $toolResultValue
+        $matchedPatterns = Get-MatchedPatterns -Text $toolResultJson -Patterns $patterns
 
-        if ($toolResultJson -ne '{}' -and $toolResultJson -ne 'null' -and (Test-ContainsSensitive -Text $toolResultJson -Patterns $patterns)) {
+        if ($toolResultJson -ne '{}' -and $toolResultJson -ne 'null' -and $matchedPatterns.Count -gt 0) {
             $maskedResultValue = Invoke-MaskValue -Value $toolResultValue -Patterns $patterns
             $maskedResult = Get-PreviewText -Text (Convert-ToJsonText -Value $maskedResultValue)
             $additionalContext = "SECURITY: '$toolName' returned sensitive data. Continue with this masked result only:`n$maskedResult"
+            $action = Resolve-EnforcementAction -HookEvent $hookEvent -MatchedPatterns $matchedPatterns
+            $matchedPatternNames = (Get-PatternDisplayNames -Patterns $matchedPatterns) -join ', '
+
+            if ($action -eq 'block') {
+                Write-PostToolUseContextOutput -SystemMessage "Sensitive data appeared in result from '$toolName'." -AdditionalContext $additionalContext -Block -Reason "Sensitive patterns detected in tool result: $matchedPatternNames"
+                exit 0
+            }
+
             Write-PostToolUseContextOutput -SystemMessage "Sensitive data appeared in result from '$toolName'. A masked preview was generated." -AdditionalContext $additionalContext
             exit 0
         }
@@ -805,9 +1023,18 @@ switch ($hookEvent) {
         $transcriptPath = Get-TranscriptPath -HookData $hookData
         if (-not [string]::IsNullOrWhiteSpace($transcriptPath) -and (Test-Path $transcriptPath -PathType Leaf)) {
             $transcript = Get-Content -Path $transcriptPath -Raw -Encoding UTF8
+            $matchedPatterns = Get-MatchedPatterns -Text $transcript -Patterns $patterns
 
-            if (Test-ContainsSensitive -Text $transcript -Patterns $patterns) {
+            if ($matchedPatterns.Count -gt 0) {
                 $maskedTranscript = Get-PreviewText -Text (Invoke-MaskText -Text $transcript -Patterns $patterns)
+                $action = Resolve-EnforcementAction -HookEvent $hookEvent -MatchedPatterns $matchedPatterns
+                $matchedPatternNames = (Get-PatternDisplayNames -Patterns $matchedPatterns) -join ', '
+
+                if ($action -eq 'block') {
+                    Write-StopContextOutput -HookEvent $hookEvent -SystemMessage 'Sensitive data detected before stop.' -Reason "Sensitive patterns detected before stop: $matchedPatternNames" -Block
+                    exit 0
+                }
+
                 Write-StopContextOutput -HookEvent $hookEvent -SystemMessage 'Sensitive data detected before stop. Best-effort masked transcript preview generated.' -Reason ("SECURITY: use masked placeholders only. Preview:`n$maskedTranscript")
                 exit 0
             }
@@ -824,9 +1051,18 @@ switch ($hookEvent) {
         $transcriptPath = Get-TranscriptPath -HookData $hookData
         if (-not [string]::IsNullOrWhiteSpace($transcriptPath) -and (Test-Path $transcriptPath -PathType Leaf)) {
             $transcript = Get-Content -Path $transcriptPath -Raw -Encoding UTF8
+            $matchedPatterns = Get-MatchedPatterns -Text $transcript -Patterns $patterns
 
-            if (Test-ContainsSensitive -Text $transcript -Patterns $patterns) {
+            if ($matchedPatterns.Count -gt 0) {
                 $maskedTranscript = Get-PreviewText -Text (Invoke-MaskText -Text $transcript -Patterns $patterns)
+                $action = Resolve-EnforcementAction -HookEvent $hookEvent -MatchedPatterns $matchedPatterns
+                $matchedPatternNames = (Get-PatternDisplayNames -Patterns $matchedPatterns) -join ', '
+
+                if ($action -eq 'block') {
+                    Write-StopContextOutput -HookEvent $hookEvent -SystemMessage 'Sensitive data detected in subagent transcript.' -Reason "Sensitive patterns detected in subagent transcript: $matchedPatternNames" -Block
+                    exit 0
+                }
+
                 Write-StopContextOutput -HookEvent $hookEvent -SystemMessage 'Sensitive data detected in subagent transcript. Best-effort masked preview generated.' -Reason ("SECURITY: use masked placeholders only. Preview:`n$maskedTranscript")
                 exit 0
             }
