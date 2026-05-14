@@ -169,6 +169,101 @@ function Get-ActiveMaskPatterns {
     return
 }
 
+function Get-MaskDataNormalizedDigits {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return ''
+    }
+
+    return ([regex]::Replace($Value, '\D', ''))
+}
+
+function Test-MaskDataLuhnChecksum {
+    param([string]$Value)
+
+    $digits = Get-MaskDataNormalizedDigits -Value $Value
+    if ($digits.Length -lt 13 -or $digits.Length -gt 19) {
+        return $false
+    }
+
+    if (($digits.ToCharArray() | Select-Object -Unique).Count -lt 2) {
+        return $false
+    }
+
+    $sum = 0
+    $doubleDigit = $false
+    for ($i = $digits.Length - 1; $i -ge 0; $i--) {
+        $n = [int]::Parse($digits[$i])
+        if ($doubleDigit) {
+            $n *= 2
+            if ($n -gt 9) {
+                $n -= 9
+            }
+        }
+        $sum += $n
+        $doubleDigit = -not $doubleDigit
+    }
+
+    return (($sum % 10) -eq 0)
+}
+
+function Test-MaskDataPatternMatchValue {
+    param(
+        [System.Collections.IDictionary]$Pattern,
+        [string]$Value
+    )
+
+    $validator = if ($Pattern.Contains('validator')) { [string]$Pattern['validator'] } else { '' }
+    switch ($validator.ToLowerInvariant()) {
+        'luhn' { return (Test-MaskDataLuhnChecksum -Value $Value) }
+        default { return $true }
+    }
+}
+
+function Test-MaskDataPatternMatchesText {
+    param(
+        [System.Collections.IDictionary]$Pattern,
+        [string]$Text
+    )
+
+    $regex = [regex]::new([string]$Pattern['regex'])
+    $regexMatches = $regex.Matches($Text)
+    foreach ($match in $regexMatches) {
+        if (Test-MaskDataPatternMatchValue -Pattern $Pattern -Value $match.Value) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Invoke-MaskDataPatternText {
+    param(
+        [string]$Text,
+        [System.Collections.IDictionary]$Pattern,
+        [string]$Replacement
+    )
+
+    $validator = if ($Pattern.Contains('validator')) { [string]$Pattern['validator'] } else { '' }
+    if ([string]::IsNullOrWhiteSpace($validator)) {
+        return [regex]::Replace($Text, [string]$Pattern['regex'], $Replacement)
+    }
+
+    $regex = [regex]::new([string]$Pattern['regex'])
+    $evaluator = [System.Text.RegularExpressions.MatchEvaluator]{
+        param([System.Text.RegularExpressions.Match]$Match)
+
+        if (Test-MaskDataPatternMatchValue -Pattern $Pattern -Value $Match.Value) {
+            return $Replacement
+        }
+
+        return $Match.Value
+    }
+
+    return $regex.Replace($Text, $evaluator)
+}
+
 function Invoke-MaskDataText {
     param(
         [string]$Text,
@@ -189,7 +284,7 @@ function Invoke-MaskDataText {
             continue
         }
 
-        $result = [regex]::Replace($result, [string]$pattern['regex'], $replacement)
+        $result = Invoke-MaskDataPatternText -Text $result -Pattern $pattern -Replacement $replacement
     }
 
     return $result
@@ -204,7 +299,7 @@ function Get-MaskDataMatchedPatterns {
     $matches = New-Object System.Collections.ArrayList
     foreach ($pattern in $Patterns) {
         try {
-            if ([regex]::IsMatch($Text, [string]$pattern['regex'])) {
+            if (Test-MaskDataPatternMatchesText -Pattern $pattern -Text $Text) {
                 $name = if ($pattern.Contains('name') -and -not [string]::IsNullOrWhiteSpace([string]$pattern['name'])) {
                     [string]$pattern['name']
                 } else {
@@ -243,13 +338,20 @@ function Test-MaskDataConfig {
         }
     }
 
-    foreach ($fieldName in @('externalToolsRegex', 'sensitiveFilenameRegex')) {
+    foreach ($fieldName in @('externalToolsRegex', 'sensitiveFilenameRegex', 'denyPathRegex', 'denyShellCommandRegex')) {
         if ($config.Contains($fieldName) -and -not [string]::IsNullOrWhiteSpace([string]$config[$fieldName])) {
             try {
                 [void][regex]::new([string]$config[$fieldName])
             } catch {
                 [void]$errors.Add("Invalid regex in '$fieldName': $($_.Exception.Message)")
             }
+        }
+    }
+
+    if ($config.Contains('sensitiveFilenameValidator') -and -not [string]::IsNullOrWhiteSpace([string]$config['sensitiveFilenameValidator'])) {
+        $sensitiveFilenameValidator = [string]$config['sensitiveFilenameValidator']
+        if ($sensitiveFilenameValidator -notin @('luhn')) {
+            [void]$errors.Add("sensitiveFilenameValidator '$sensitiveFilenameValidator' is unsupported. Allowed: luhn")
         }
     }
 
@@ -290,6 +392,13 @@ function Test-MaskDataConfig {
 
         if ([string]::IsNullOrWhiteSpace($replacement)) {
             [void]$errors.Add("$displayName must define 'replacement' or 'name'.")
+        }
+
+        if ($entry.Pattern.Contains('validator') -and -not [string]::IsNullOrWhiteSpace([string]$entry.Pattern['validator'])) {
+            $validator = [string]$entry.Pattern['validator']
+            if ($validator -notin @('luhn')) {
+                [void]$errors.Add("$displayName validator '$validator' is unsupported. Allowed: luhn")
+            }
         }
 
         if ($entry.Pattern.Contains('enforcement') -and $null -ne $entry.Pattern['enforcement']) {

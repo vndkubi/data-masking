@@ -11,6 +11,8 @@ RULES:
 2. When sending data to any tool or external service, use only the masked version.
 3. Never attempt to recover or reconstruct original sensitive values.
 4. Treat purely numeric filenames with 9-16 digits as [MASKED-FILENAME].
+5. Do not read raw secrets, exports, dumps, payment files, or customer data files.
+6. Do not run shell commands that can upload data to external services.
 "@
 
 $script:LogFile = $null
@@ -126,6 +128,8 @@ function Write-PostToolUseContextOutput {
     if ($Block) {
         $payload['decision'] = 'block'
         $payload['reason'] = $Reason
+        $payload['continue'] = $false
+        $payload['stopReason'] = $Reason
     }
 
     if (-not [string]::IsNullOrWhiteSpace($SystemMessage)) {
@@ -472,6 +476,101 @@ function Get-ActivePatterns {
 }
 
 # Two tiny helpers keep the decision code readable: one checks, one rewrites.
+function Get-NormalizedDigits {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return ''
+    }
+
+    return ([regex]::Replace($Value, '\D', ''))
+}
+
+function Test-LuhnChecksum {
+    param([string]$Value)
+
+    $digits = Get-NormalizedDigits -Value $Value
+    if ($digits.Length -lt 13 -or $digits.Length -gt 19) {
+        return $false
+    }
+
+    if (($digits.ToCharArray() | Select-Object -Unique).Count -lt 2) {
+        return $false
+    }
+
+    $sum = 0
+    $doubleDigit = $false
+    for ($i = $digits.Length - 1; $i -ge 0; $i--) {
+        $n = [int]::Parse($digits[$i])
+        if ($doubleDigit) {
+            $n *= 2
+            if ($n -gt 9) {
+                $n -= 9
+            }
+        }
+        $sum += $n
+        $doubleDigit = -not $doubleDigit
+    }
+
+    return (($sum % 10) -eq 0)
+}
+
+function Test-PatternMatchValue {
+    param(
+        [System.Collections.IDictionary]$Pattern,
+        [string]$Value
+    )
+
+    $validator = if ($Pattern.Contains('validator')) { [string]$Pattern['validator'] } else { '' }
+    switch ($validator.ToLowerInvariant()) {
+        'luhn' { return (Test-LuhnChecksum -Value $Value) }
+        default { return $true }
+    }
+}
+
+function Test-PatternMatchesText {
+    param(
+        [System.Collections.IDictionary]$Pattern,
+        [string]$Text
+    )
+
+    $regex = [regex]::new([string]$Pattern['regex'])
+    $matches = $regex.Matches($Text)
+    foreach ($match in $matches) {
+        if (Test-PatternMatchValue -Pattern $Pattern -Value $match.Value) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Invoke-PatternMaskText {
+    param(
+        [string]$Text,
+        [System.Collections.IDictionary]$Pattern,
+        [string]$Replacement
+    )
+
+    $validator = if ($Pattern.Contains('validator')) { [string]$Pattern['validator'] } else { '' }
+    if ([string]::IsNullOrWhiteSpace($validator)) {
+        return [regex]::Replace($Text, [string]$Pattern['regex'], $Replacement)
+    }
+
+    $regex = [regex]::new([string]$Pattern['regex'])
+    $evaluator = [System.Text.RegularExpressions.MatchEvaluator]{
+        param([System.Text.RegularExpressions.Match]$Match)
+
+        if (Test-PatternMatchValue -Pattern $Pattern -Value $Match.Value) {
+            return $Replacement
+        }
+
+        return $Match.Value
+    }
+
+    return $regex.Replace($Text, $evaluator)
+}
+
 function Test-ContainsSensitive {
     param(
         [string]$Text,
@@ -484,7 +583,7 @@ function Test-ContainsSensitive {
 
     foreach ($pattern in $Patterns) {
         try {
-            if ([regex]::IsMatch($Text, [string]$pattern['regex'])) {
+            if (Test-PatternMatchesText -Pattern $pattern -Text $Text) {
                 return $true
             }
         } catch {
@@ -516,7 +615,7 @@ function Invoke-MaskText {
         }
 
         try {
-            $result = [regex]::Replace($result, [string]$pattern['regex'], $replacement)
+            $result = Invoke-PatternMaskText -Text $result -Pattern $pattern -Replacement $replacement
         } catch {
         }
     }
@@ -578,7 +677,7 @@ function Get-MatchedPatterns {
 
     foreach ($pattern in $Patterns) {
         try {
-            if ([regex]::IsMatch($Text, [string]$pattern['regex'])) {
+            if (Test-PatternMatchesText -Pattern $pattern -Text $Text) {
                 $matchedPatterns += $pattern
             }
         } catch {
@@ -751,7 +850,43 @@ function Update-ToolCommand {
 function Test-ShellTool {
     param([string]$ToolName)
 
-    return ($ToolName -in @('bash', 'powershell'))
+    return ($ToolName -in @('bash', 'powershell', 'run_in_terminal', 'runInTerminal', 'terminal'))
+}
+
+function Test-ConfiguredRegexMatch {
+    param(
+        [string]$Text,
+        [string]$Regex,
+        [string]$Validator = ''
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text) -or [string]::IsNullOrWhiteSpace($Regex)) {
+        return $false
+    }
+
+    try {
+        $regexObj = [regex]::new($Regex, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if ([string]::IsNullOrWhiteSpace($Validator)) {
+            return $regexObj.IsMatch($Text)
+        }
+
+        foreach ($match in $regexObj.Matches($Text)) {
+            switch ($Validator.ToLowerInvariant()) {
+                'luhn' {
+                    if (Test-LuhnChecksum -Value $match.Value) {
+                        return $true
+                    }
+                }
+                default {
+                    return $true
+                }
+            }
+        }
+
+        return $false
+    } catch {
+        return $false
+    }
 }
 
 function ConvertTo-Base64Utf8 {
@@ -986,6 +1121,9 @@ if ($patterns.Count -eq 0) {
 
 $externalToolsRegex = if ($config.Contains('externalToolsRegex')) { [string]$config['externalToolsRegex'] } else { '^(search_web|fetch_webpage|web_fetch|mcp_.*|github_.*|github_repo|task|bash|powershell)$' }
 $sensitiveFilenameRegex = if ($config.Contains('sensitiveFilenameRegex')) { [string]$config['sensitiveFilenameRegex'] } else { '(^|[\\/])\d{9,16}(\.[^\\/]+)?$' }
+$sensitiveFilenameValidator = if ($config.Contains('sensitiveFilenameValidator')) { [string]$config['sensitiveFilenameValidator'] } else { '' }
+$denyPathRegex = if ($config.Contains('denyPathRegex')) { [string]$config['denyPathRegex'] } else { '(^|[\\/])(\.env[^\\/]*|.*\.(pem|key|p12|pfx|crt|cer|der|sql|dump|bak|backup|csv|tsv|xlsx|xls|parquet|avro|har|log))$|(^|[\\/])(data|exports|dumps|logs|fixtures[\\/]prod|prod-fixtures|customer-data|payment-data)([\\/]|$)' }
+$denyShellCommandRegex = if ($config.Contains('denyShellCommandRegex')) { [string]$config['denyShellCommandRegex'] } else { '(?i)\b(curl|wget|Invoke-WebRequest|Invoke-RestMethod|iwr|irm|scp|sftp|ftp|nc|ncat|telnet|rsync|aws\s+s3|az\s+storage|gcloud\s+(storage|compute)|gh\s+gist|pastebinit)\b' }
 
 switch ($hookEvent) {
     'SessionStart' {
@@ -1072,12 +1210,22 @@ switch ($hookEvent) {
             $resolvedPath = Resolve-ToolPath -ToolPath $toolPath -WorkspaceRoot $workspaceRoot
         }
 
+        if (Test-ConfiguredRegexMatch -Text $toolPath -Regex $denyPathRegex) {
+            Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason "Access to '$toolPath' was denied by sensitive path policy."
+            exit 0
+        }
+
         if (Test-ShellTool -ToolName $toolName) {
             $toolCommand = Get-ToolCommand -ToolInput $toolInputMap
 
             if ($null -ne $toolCommand) {
                 $action = Resolve-EnforcementAction -HookEvent $hookEvent -MatchedPatterns $matchedInputPatterns
                 $matchedPatternNames = (Get-PatternDisplayNames -Patterns $matchedInputPatterns) -join ', '
+
+                if (Test-ConfiguredRegexMatch -Text $toolCommand.Value -Regex $denyShellCommandRegex) {
+                    Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason 'Shell command was denied by exfiltration policy. Use a local-only command or ask for explicit review.'
+                    exit 0
+                }
 
                 if ($matchedInputPatterns.Count -gt 0 -and $action -eq 'deny') {
                     Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason "Sensitive patterns detected in shell input: $matchedPatternNames. Tool execution was denied."
@@ -1124,7 +1272,7 @@ switch ($hookEvent) {
             exit 0
         }
 
-        if (-not [string]::IsNullOrWhiteSpace($toolPath) -and [regex]::IsMatch($toolPath, $sensitiveFilenameRegex, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
+        if (-not [string]::IsNullOrWhiteSpace($toolPath) -and (Test-ConfiguredRegexMatch -Text $toolPath -Regex $sensitiveFilenameRegex -Validator $sensitiveFilenameValidator)) {
             if ($toolName -in @('view', 'read_file', 'readFile') -and -not [string]::IsNullOrWhiteSpace($resolvedPath) -and (Test-Path $resolvedPath -PathType Leaf)) {
                 $pathContent = Get-Content -Path $resolvedPath -Raw -Encoding UTF8
                 $maskedPathContent = Invoke-MaskText -Text $pathContent -Patterns $patterns
@@ -1136,7 +1284,7 @@ switch ($hookEvent) {
                 exit 0
             }
 
-            Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason 'Sensitive numeric filename detected, but no safe replacement path was available. The request was allowed unchanged.'
+            Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason 'Sensitive numeric filename detected and no safe masked replacement was available. Tool execution was denied.'
             exit 0
         }
 

@@ -1,14 +1,135 @@
 {
-  "externalToolsRegex": "^(search_web|fetch_webpage|web_fetch|mcp_.*|github_.*|github_repo|task|bash|powershell|external_api_call)$",
-  "sensitiveFilenameRegex": "(^|[\\/])\\d{9,16}(\\.[^\\/]+)?$",
+  "externalToolsRegex": "^(search_web|fetch_webpage|web_fetch|mcp_.*|github_.*|github_repo|task|bash|powershell|run_in_terminal|runInTerminal|terminal|external_api_call)$",
+  "sensitiveFilenameRegex": "\\d(?:[ -]?\\d){12,18}",
+  "sensitiveFilenameValidator": "luhn",
+  "denyPathRegex": "",
+  "denyShellCommandRegex": "(?i)\\b(curl|wget)\\b(?=.*\\b(?:https?|ftp)://)(?=.*(?:--data(?:-raw|-binary|-urlencode)?\\s+@|--form\\s+\\S*@|--upload-file\\s+|-T\\s+|--post-file\\s+|@[^\\s]+))|\\b(scp|sftp|ftp|nc|ncat|telnet)\\b|\\brsync\\b(?=.*(?:\\s[^\\s]+@|::))|\\b(?:aws\\s+s3\\s+(?:cp|sync)|az\\s+storage|gcloud\\s+storage|gh\\s+gist|pastebinit)\\b",
   "patterns": [
     {
-      "name": "Credit Card",
+      "name": "PCI Track 1 Data",
       "enabled": true,
-      "regex": "\\b(?:\\d{4}[- ]?){3}\\d{4}\\b",
-      "replacement": "[MASKED-CC]",
+      "regex": "(?i)%B\\d{13,19}\\^[^?]*\\?",
+      "replacement": "[MASKED-TRACK1]",
       "enforcement": {
-        "UserPromptSubmit": "stop"
+        "UserPromptSubmit": "mask",
+        "PreToolUse": "mask",
+        "PermissionRequest": "mask",
+        "PostToolUse": "mask",
+        "Stop": "mask",
+        "SubagentStop": "mask"
+      }
+    },
+    {
+      "name": "PCI Track 2 Data",
+      "enabled": true,
+      "regex": ";\\d{13,19}=[0-9=]+\\?",
+      "replacement": "[MASKED-TRACK2]",
+      "enforcement": {
+        "UserPromptSubmit": "mask",
+        "PreToolUse": "mask",
+        "PermissionRequest": "mask",
+        "PostToolUse": "mask",
+        "Stop": "mask",
+        "SubagentStop": "mask"
+      }
+    },
+    {
+      "name": "Card Verification Code Field",
+      "enabled": true,
+      "regex": "(?i)\\b(cvv2?|cvc2?|cid|cav2|cvn|card[_ -]?verification[_ -]?(?:code|value)|security[_ -]?code)\\b\\s*[:=]\\s*[\"']?\\d{3,4}\\b",
+      "replacement": "$1=[MASKED-CVV]",
+      "enforcement": {
+        "UserPromptSubmit": "mask",
+        "PreToolUse": "mask",
+        "PermissionRequest": "mask",
+        "PostToolUse": "mask",
+        "Stop": "mask",
+        "SubagentStop": "mask"
+      }
+    },
+    {
+      "name": "PIN Block Field",
+      "enabled": true,
+      "regex": "(?i)\\b(pin[_ -]?block|encrypted[_ -]?pin)\\b\\s*[:=]\\s*[\"']?[A-F0-9]{8,32}\\b",
+      "replacement": "$1=[MASKED-PIN-BLOCK]",
+      "enforcement": {
+        "UserPromptSubmit": "mask",
+        "PreToolUse": "mask",
+        "PermissionRequest": "mask",
+        "PostToolUse": "mask",
+        "Stop": "mask",
+        "SubagentStop": "mask"
+      }
+    },
+    {
+      "name": "Payment Card PAN",
+      "enabled": true,
+      "regex": "(?<!\\d)\\d(?:[ -]?\\d){12,18}(?!\\d)",
+      "validator": "luhn",
+      "replacement": "[MASKED-PAN]",
+      "enforcement": {
+        "UserPromptSubmit": "mask",
+        "PreToolUse": "mask",
+        "PermissionRequest": "mask",
+        "PostToolUse": "mask",
+        "Stop": "mask",
+        "SubagentStop": "mask"
+      }
+    },
+    {
+      "name": "Card Expiration Field",
+      "enabled": true,
+      "regex": "(?i)\\b(exp(?:iry|iration)?(?:[_ -]?date)?|card[_ -]?exp(?:iry|iration)?)\\b\\s*[:=]\\s*[\"']?(?:0[1-9]|1[0-2])[/\\-]?(?:\\d{2}|20\\d{2})\\b",
+      "replacement": "$1=[MASKED-EXPIRY]",
+      "enforcement": {
+        "UserPromptSubmit": "mask",
+        "PreToolUse": "mask",
+        "PermissionRequest": "mask",
+        "PostToolUse": "mask",
+        "Stop": "mask",
+        "SubagentStop": "mask"
+      }
+    },
+    {
+      "name": "Service Code Field",
+      "enabled": true,
+      "regex": "(?i)\\b(service[_ -]?code)\\b\\s*[:=]\\s*[\"']?\\d{3}\\b",
+      "replacement": "$1=[MASKED-SERVICE-CODE]",
+      "enforcement": {
+        "UserPromptSubmit": "mask",
+        "PreToolUse": "mask",
+        "PermissionRequest": "mask",
+        "PostToolUse": "mask",
+        "Stop": "mask",
+        "SubagentStop": "mask"
+      }
+    },
+    {
+      "name": "Cardholder Name Field",
+      "enabled": true,
+      "regex": "(?i)\\b(cardholder[_ -]?name|name[_ -]?on[_ -]?card)\\b\\s*[:=]\\s*[\"']?.+?(?=[\"']?\\s*(?:[,}\\r\\n]|$)|\\s+(?:track(?:1|2)?|pan|card(?:_?number)?|cvv2?|cvc2?|cid|cav2|cvn|exp(?:iry|iration)?(?:[_ -]?date)?|service[_ -]?code|pin[_ -]?block|email|password|passwd|secret|pwd|api[_-]?key|token|customer[_-]?id)\\s*[:=])",
+      "replacement": "$1=[MASKED-CARDHOLDER-NAME]",
+      "enforcement": {
+        "UserPromptSubmit": "mask",
+        "PreToolUse": "mask",
+        "PermissionRequest": "mask",
+        "PostToolUse": "mask",
+        "Stop": "mask",
+        "SubagentStop": "mask"
+      }
+    },
+    {
+      "name": "Private Key",
+      "enabled": true,
+      "regex": "-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----",
+      "replacement": "[MASKED-PRIVATE-KEY]",
+      "enforcement": {
+        "UserPromptSubmit": "mask",
+        "PreToolUse": "mask",
+        "PermissionRequest": "mask",
+        "PostToolUse": "mask",
+        "Stop": "mask",
+        "SubagentStop": "mask"
       }
     },
     {
@@ -17,7 +138,12 @@
       "regex": "(?i)\\b(?:sk|pk|rk|token|api[_-]?key)[-_=: ]*[A-Za-z0-9._\\-]{12,}\\b",
       "replacement": "[MASKED-KEY]",
       "enforcement": {
-        "UserPromptSubmit": "stop"
+        "UserPromptSubmit": "mask",
+        "PreToolUse": "mask",
+        "PermissionRequest": "mask",
+        "PostToolUse": "mask",
+        "Stop": "mask",
+        "SubagentStop": "mask"
       }
     },
     {
@@ -26,7 +152,26 @@
       "regex": "(?i)Bearer\\s+[A-Za-z0-9._\\-]{10,}",
       "replacement": "Bearer [MASKED-TOKEN]",
       "enforcement": {
-        "UserPromptSubmit": "stop"
+        "UserPromptSubmit": "mask",
+        "PreToolUse": "mask",
+        "PermissionRequest": "mask",
+        "PostToolUse": "mask",
+        "Stop": "mask",
+        "SubagentStop": "mask"
+      }
+    },
+    {
+      "name": "JWT",
+      "enabled": true,
+      "regex": "\\beyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\b",
+      "replacement": "[MASKED-JWT]",
+      "enforcement": {
+        "UserPromptSubmit": "mask",
+        "PreToolUse": "mask",
+        "PermissionRequest": "mask",
+        "PostToolUse": "mask",
+        "Stop": "mask",
+        "SubagentStop": "mask"
       }
     },
     {
@@ -35,7 +180,40 @@
       "regex": "(?i)\\b(password|passwd|secret|pwd)\\b\\s*[:=]\\s*[^,\\s\"'}]{4,}",
       "replacement": "$1=[MASKED-PASS]",
       "enforcement": {
-        "UserPromptSubmit": "stop"
+        "UserPromptSubmit": "mask",
+        "PreToolUse": "mask",
+        "PermissionRequest": "mask",
+        "PostToolUse": "mask",
+        "Stop": "mask",
+        "SubagentStop": "mask"
+      }
+    },
+    {
+      "name": "US SSN",
+      "enabled": true,
+      "regex": "\\b\\d{3}-\\d{2}-\\d{4}\\b",
+      "replacement": "[MASKED-SSN]",
+      "enforcement": {
+        "UserPromptSubmit": "mask",
+        "PreToolUse": "mask",
+        "PermissionRequest": "mask",
+        "PostToolUse": "mask",
+        "Stop": "mask",
+        "SubagentStop": "mask"
+      }
+    },
+    {
+      "name": "Email Address",
+      "enabled": true,
+      "regex": "(?i)\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b",
+      "replacement": "[MASKED-EMAIL]",
+      "enforcement": {
+        "UserPromptSubmit": "mask",
+        "PreToolUse": "mask",
+        "PermissionRequest": "mask",
+        "PostToolUse": "mask",
+        "Stop": "mask",
+        "SubagentStop": "mask"
       }
     }
   ],
@@ -46,7 +224,12 @@
       "regex": "(?i)(\"?customer_id\"?\\s*[:=]\\s*\"?)CUST-\\d{6,}",
       "replacement": "$1[MASKED-CUSTOMER-ID]",
       "enforcement": {
-        "UserPromptSubmit": "stop"
+        "UserPromptSubmit": "mask",
+        "PreToolUse": "mask",
+        "PermissionRequest": "mask",
+        "PostToolUse": "mask",
+        "Stop": "mask",
+        "SubagentStop": "mask"
       }
     }
   ]

@@ -60,7 +60,21 @@ Validate the config without installing anything:
 
 ## Configuration
 
-`masking-config.json` is strict JSON. The bundled file is intentionally small and only ships with a few starter samples plus one `customPatterns` example. The bundled patterns stop `UserPromptSubmit` when a raw match is visible, so the user can resubmit with placeholders before the agent continues.
+`masking-config.json` is strict JSON. The bundled file ships mask-and-continue defaults for PCI/DSS account data, common PII, secrets, tokens, passwords, emails, SSNs, and customer IDs. Bundled patterns use `mask` enforcement so Copilot can keep working on payment projects while hook-visible sensitive values are replaced with placeholders.
+
+Top-level policy controls:
+
+- `externalToolsRegex`: tool names whose hook-visible inputs should be treated as outbound/external.
+- `sensitiveFilenameRegex`: path/filename candidate matcher. The bundled config looks for 13-19 digit PAN candidates anywhere in the path.
+- `sensitiveFilenameValidator`: optional extra check for `sensitiveFilenameRegex`. The bundled config uses `luhn`, so numeric filenames are treated as sensitive only when the candidate looks like a payment card PAN.
+- `denyPathRegex`: optional file path deny policy. The bundled CLI config leaves this empty so read tools can be redirected to masked temp files instead of being denied.
+- `denyShellCommandRegex`: shell commands denied before execution because they can upload raw local files or exfiltrate data outside the masking flow, such as `curl --data-binary @file`, `scp`, `aws s3`, and gist upload commands.
+
+Pattern-level controls:
+
+- `regex`: candidate matcher.
+- `validator`: optional extra check before a regex candidate is considered sensitive. The bundled PAN pattern uses `validator: "luhn"` so long numeric IDs are not masked unless they pass the payment-card checksum.
+- `replacement`: placeholder used for masking.
 
 Do not comment out patterns. Disable a rule with:
 
@@ -112,7 +126,7 @@ Preview masking against a file:
 .\cli\preview-mask.ps1 -FilePath .\data\data-sample.json
 ```
 
-Optional enforcement can be attached to a pattern when you need a stronger response at a specific step:
+Per-pattern enforcement controls the hook response at each step:
 
 ```json
 {
@@ -121,8 +135,8 @@ Optional enforcement can be attached to a pattern when you need a stronger respo
   "regex": "(?i)\\b(password|passwd|secret|pwd)\\b\\s*[:=]\\s*[^,\\s\"'}]{4,}",
   "replacement": "$1=[MASKED-PASS]",
   "enforcement": {
-    "UserPromptSubmit": "stop",
-    "PreToolUse": "deny"
+    "UserPromptSubmit": "mask",
+    "PreToolUse": "mask"
   }
 }
 ```
@@ -146,15 +160,19 @@ Meaning of the main control actions:
 
 These actions are different because the hook API exposes different control surfaces at different stages. A prompt-submission hook can stop the request, a tool hook can deny that tool execution, and a permission hook can additionally interrupt the agent flow. There is no single universal action that means the same thing at every event.
 
-When multiple patterns match in the same event, the most restrictive configured action wins. If `enforcement` is omitted, the current replace-only default stays in effect.
+When multiple patterns match in the same event, the most restrictive configured action wins. If `enforcement` is omitted, the current replace-only default stays in effect. The bundled PCI/DSS mode intentionally uses `mask` rather than `stop`, `deny`, `interrupt`, or `block` for normal prompt, tool, permission, and post-tool flows.
+
+The PAN rule is intentionally two-stage: regex finds 13-19 digit candidates, then Luhn validation decides whether to mask. This avoids masking most long numeric IDs, but it is still a heuristic because some non-card IDs can pass Luhn by chance.
+
+Avoid using PANs as mock-data filenames when possible. Prefer safe aliases such as `visa-valid-01.json` and put test PANs inside the file content. If a repository already has PAN-like filenames, use file-read tools rather than arbitrary shell commands: `read_file` and `view` can be redirected to a masked temp path, while shell commands that list or pass filenames may expose only masked aliases that are not reusable paths.
 
 ## Hook Behavior
 
 - `SessionStart`: emits the masking policy context.
-- `UserPromptSubmit`: by default it emits a best-effort masking hint for the prompt text only; the bundled patterns configure `stop` so raw prompt matches are blocked where the surface honors this output.
-- `PreToolUse`: the primary mutation and enforcement point. By default it rewrites or redirects inputs; a matched pattern can optionally configure `deny`. File-read tools are redirected to masked temporary copies when matching content is detected. Shell tools such as `bash` and `powershell` are rewritten through `mask-command-output.ps1`, which runs the original command and masks stdout/stderr before the result is returned to the model.
-- `PermissionRequest`: CLI-only advisory layer by default; a matched pattern can optionally configure `deny` or `interrupt`.
-- `PostToolUse` and `PostToolUseFailure`: best-effort leak detection after tool execution. A matched pattern can optionally configure `block` for `PostToolUse`. For file-read tools such as `read_file` and `view`, the hook can re-check the requested file path when the `PostToolUse` payload does not include the tool result body.
+- `UserPromptSubmit`: scans the prompt text only. Bundled sensitive patterns configure `mask`, so the prompt is not stopped; the hook emits a masked advisory preview.
+- `PreToolUse`: the primary masking point. File-read tools are redirected to masked temporary copies when matching content is detected. Shell tools such as `bash`, `powershell`, `run_in_terminal`, `runInTerminal`, and `terminal` are wrapped through `mask-command-output.ps1` so stdout/stderr is masked before returning to the model. Commands matching `denyShellCommandRegex` are denied because they can send raw local files outside the hook-visible output path.
+- `PermissionRequest`: CLI-only advisory layer. Bundled sensitive patterns configure `mask`, so permission payloads are not denied by pattern matches.
+- `PostToolUse` and `PostToolUseFailure`: leak detection after tool execution. Bundled sensitive patterns configure `mask`, so the hook emits masked additional context instead of blocking. For file-read tools such as `read_file` and `view`, the hook can re-check the requested file path when the `PostToolUse` payload does not include the tool result body.
 - `PreCompact`: emits a best-effort reminder before compaction.
 - `SubagentStart`: emits the masking policy for spawned agents.
 - `Stop` and `SubagentStop`: rescan the transcript and emit masked guidance by default; a matched pattern can optionally configure `block`.
@@ -163,9 +181,9 @@ When multiple patterns match in the same event, the most restrictive configured 
 The practical behavior split is:
 
 1. `PreToolUse` can still rewrite hook-visible tool input and redirect reads to masked temp files.
-2. Shell output masking protects the model from hook-visible stdout/stderr, but it does not stop the command itself from sending data to a network service or another process. Use `PreToolUse: deny` or command policy for commands that can exfiltrate secrets.
-3. `PostToolUse` is later and therefore less reliable for prevention; use `PreToolUse: deny` when the read itself must not happen.
+2. Shell command policy denies known raw file upload/exfiltration commands before execution. This is a regex guardrail, not a full DLP engine; extend `denyShellCommandRegex` for your environment.
+3. `PostToolUse` is later and therefore less reliable for prevention; keep sensitive reads on tools that `PreToolUse` can redirect or shell commands whose stdout/stderr wrapper can mask.
 4. Later events are otherwise advisory and best-effort only.
-5. VS Code attachment contents can already be embedded into the initial model request before any mutable hook sees them.
+5. VS Code attachment contents and extension-internal transcript/log fields can already be embedded or logged before any mutable hook sees them.
 
-That last point is a platform limitation: attached file content shown in VS Code debug logs under the initial `llm_request` is not currently interceptable by this hook bundle before it is sent upstream.
+That last point is a platform limitation: this CLI bundle can harden hook-visible payloads, but it cannot fix VS Code extension behavior where raw prompt attachments or internal hook telemetry are captured before the hook can rewrite them.
