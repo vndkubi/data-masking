@@ -117,6 +117,7 @@ $logsDir = Join-Path $copilotHomePath 'logs'
 
 $sourceConfig = Join-Path $bundleRoot 'masking-config.json'
 $sourceScript = Join-Path (Join-Path (Join-Path $bundleRoot 'hooks') 'scripts') 'mask-sensitive-data.ps1'
+$sourceCommandWrapper = Join-Path (Join-Path (Join-Path $bundleRoot 'hooks') 'scripts') 'mask-command-output.ps1'
 
 $validation = Test-MaskDataConfig -ConfigPath $sourceConfig
 foreach ($warning in $validation.Warnings) {
@@ -140,10 +141,12 @@ foreach ($directory in @($copilotHomePath, $hooksDir, $scriptsDir, $logsDir)) {
 
 $targetConfig = Join-Path $copilotHomePath 'masking-config.json'
 $targetScript = Join-Path $scriptsDir 'mask-sensitive-data.ps1'
+$targetCommandWrapper = Join-Path $scriptsDir 'mask-command-output.ps1'
 $targetHookConfig = Join-Path $hooksDir 'sensitive-data-mask.json'
 
 Copy-WithBackup -Source $sourceConfig -Target $targetConfig -NoBackup:$NoBackup
 Copy-WithBackup -Source $sourceScript -Target $targetScript -NoBackup:$NoBackup
+Copy-WithBackup -Source $sourceCommandWrapper -Target $targetCommandWrapper -NoBackup:$NoBackup
 
 $hookConfigJson = New-HookConfig -ScriptPath $targetScript | ConvertTo-Json -Depth 10
 Write-Utf8NoBom -Path $targetHookConfig -Content ($hookConfigJson + [Environment]::NewLine)
@@ -159,6 +162,7 @@ Write-Host "Home   : $copilotHomePath"
 Write-Host "Config : $targetConfig"
 Write-Host "Hooks  : $targetHookConfig"
 Write-Host "Script : $targetScript"
+Write-Host "Wrapper: $targetCommandWrapper"
 
 if ($runningOnWindows) {
     Write-Host "Runtime: Windows PowerShell 5.1 via powershell.exe"

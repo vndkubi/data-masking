@@ -36,6 +36,7 @@ The installer creates or updates:
     sensitive-data-mask.json
     scripts/
       mask-sensitive-data.ps1
+      mask-command-output.ps1
   logs/
 ```
 
@@ -59,7 +60,7 @@ Validate the config without installing anything:
 
 ## Configuration
 
-`masking-config.json` is strict JSON. The bundled file is intentionally small and only ships with a few starter samples plus one `customPatterns` example.
+`masking-config.json` is strict JSON. The bundled file is intentionally small and only ships with a few starter samples plus one `customPatterns` example. The bundled patterns stop `UserPromptSubmit` when a raw match is visible, so the user can resubmit with placeholders before the agent continues.
 
 Do not comment out patterns. Disable a rule with:
 
@@ -150,8 +151,8 @@ When multiple patterns match in the same event, the most restrictive configured 
 ## Hook Behavior
 
 - `SessionStart`: emits the masking policy context.
-- `UserPromptSubmit`: by default it emits a best-effort masking hint for the prompt text only; a matched pattern can optionally configure `stop`.
-- `PreToolUse`: the primary mutation and enforcement point. By default it rewrites or redirects inputs; a matched pattern can optionally configure `deny`.
+- `UserPromptSubmit`: by default it emits a best-effort masking hint for the prompt text only; the bundled patterns configure `stop` so raw prompt matches are blocked where the surface honors this output.
+- `PreToolUse`: the primary mutation and enforcement point. By default it rewrites or redirects inputs; a matched pattern can optionally configure `deny`. File-read tools are redirected to masked temporary copies when matching content is detected. Shell tools such as `bash` and `powershell` are rewritten through `mask-command-output.ps1`, which runs the original command and masks stdout/stderr before the result is returned to the model.
 - `PermissionRequest`: CLI-only advisory layer by default; a matched pattern can optionally configure `deny` or `interrupt`.
 - `PostToolUse` and `PostToolUseFailure`: best-effort leak detection after tool execution. A matched pattern can optionally configure `block` for `PostToolUse`. For file-read tools such as `read_file` and `view`, the hook can re-check the requested file path when the `PostToolUse` payload does not include the tool result body.
 - `PreCompact`: emits a best-effort reminder before compaction.
@@ -162,8 +163,9 @@ When multiple patterns match in the same event, the most restrictive configured 
 The practical behavior split is:
 
 1. `PreToolUse` can still rewrite hook-visible tool input and redirect reads to masked temp files.
-2. `PostToolUse` is later and therefore less reliable for prevention; use `PreToolUse: deny` when the read itself must not happen.
-3. Later events are otherwise advisory and best-effort only.
-3. VS Code attachment contents can already be embedded into the initial model request before any mutable hook sees them.
+2. Shell output masking protects the model from hook-visible stdout/stderr, but it does not stop the command itself from sending data to a network service or another process. Use `PreToolUse: deny` or command policy for commands that can exfiltrate secrets.
+3. `PostToolUse` is later and therefore less reliable for prevention; use `PreToolUse: deny` when the read itself must not happen.
+4. Later events are otherwise advisory and best-effort only.
+5. VS Code attachment contents can already be embedded into the initial model request before any mutable hook sees them.
 
 That last point is a platform limitation: attached file content shown in VS Code debug logs under the initial `llm_request` is not currently interceptable by this hook bundle before it is sent upstream.

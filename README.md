@@ -26,6 +26,7 @@ Important for `devcontainer + WSL`:
     sensitive-data-mask.json
     scripts/
       mask-sensitive-data.ps1
+      mask-command-output.ps1
 cli/
   install.ps1
   validate-config.ps1
@@ -69,6 +70,7 @@ your-project/
       sensitive-data-mask.json
       scripts/
         mask-sensitive-data.ps1
+        mask-command-output.ps1
 ```
 
 Copy `cli/` as well if you want the local helper commands: `validate-config`, `preview-mask`, and the global installer.
@@ -94,6 +96,7 @@ The installer writes:
     sensitive-data-mask.json
     scripts/
       mask-sensitive-data.ps1
+      mask-command-output.ps1
   logs/
 ```
 

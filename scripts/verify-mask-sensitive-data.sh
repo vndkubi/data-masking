@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================
 # verify-mask-sensitive-data.sh
-# Verifies that mask-sensitive-data.sh correctly masks a file.
-# Feeds the file content through the hook script as a
-# UserPromptSubmit event and prints the masked output.
+# Verifies that the current PowerShell hook redirects a file read to a
+# masked temporary copy when sensitive content is detected.
 #
 # Usage:
 #   ./verify-mask-sensitive-data.sh <file_path>
@@ -51,11 +50,11 @@ to_unix_path() {
     printf '%s' "$p"
 }
 
-# Walk up directory tree to find project root (contains .github/hooks/masking-config.json)
+# Walk up directory tree to find project root for the current CLI bundle.
 find_project_root() {
     local dir="$1"
     while true; do
-        if [ -f "$dir/.github/hooks/masking-config.json" ]; then
+        if [ -f "$dir/cli/hooks/scripts/mask-sensitive-data.ps1" ] && [ -f "$dir/cli/masking-config.json" ]; then
             printf '%s' "$dir"
             return 0
         fi
@@ -99,44 +98,56 @@ if PROJECT_ROOT=$(find_project_root "$FILE_DIR" 2>/dev/null); then
 elif PROJECT_ROOT=$(find_project_root "$(dirname "$SCRIPT_OWN_DIR")" 2>/dev/null); then
     :
 else
-    printf "${RED}ERROR:${RESET} Could not find .github/hooks/masking-config.json.\n"
-    printf "Run this script from within the project that has the masking config.\n"
+    printf "${RED}ERROR:${RESET} Could not find cli/hooks/scripts/mask-sensitive-data.ps1 and cli/masking-config.json.\n"
+    printf "Run this script from within the mask-data project.\n"
     exit 1
 fi
 
-HOOK_SCRIPT="$PROJECT_ROOT/.github/hooks/scripts/mask-sensitive-data.sh"
+HOOK_SCRIPT="$PROJECT_ROOT/cli/hooks/scripts/mask-sensitive-data.ps1"
+CONFIG_FILE="$PROJECT_ROOT/cli/masking-config.json"
 
 if [ ! -f "$HOOK_SCRIPT" ]; then
     printf "${RED}ERROR:${RESET} Hook script not found: %s\n" "$HOOK_SCRIPT"
     exit 1
 fi
 
-# ------------------------------------------------------------------
-# Read file content
-# ------------------------------------------------------------------
-ORIGINAL=$(cat "$FILE_PATH")
+if ! command -v pwsh &>/dev/null; then
+    printf "${RED}ERROR:${RESET} pwsh is required to run the current hook engine on Unix-like environments.\n"
+    exit 1
+fi
 
 # ------------------------------------------------------------------
-# Build synthetic UserPromptSubmit hook payload
+# Build synthetic PreToolUse file-read hook payload
 # ------------------------------------------------------------------
 HOOK_PAYLOAD=$(jq -n \
-    --arg prompt "$ORIGINAL" \
+    --arg path "$FILE_PATH" \
     --arg cwd    "$PROJECT_ROOT" \
     '{
-        "hook_event_name": "UserPromptSubmit",
-        "prompt": $prompt,
-        "cwd":    $cwd
+        "hook_event_name": "PreToolUse",
+        "tool_name": "view",
+        "tool_input": {
+            "path": $path
+        },
+        "cwd": $cwd
     }')
 
 # ------------------------------------------------------------------
 # Run the hook script
 # ------------------------------------------------------------------
-HOOK_OUTPUT=$(printf '%s' "$HOOK_PAYLOAD" | bash "$HOOK_SCRIPT" 2>/dev/null || true)
+HOOK_OUTPUT=$(printf '%s' "$HOOK_PAYLOAD" | MASK_DATA_CONFIG="$CONFIG_FILE" pwsh -NoLogo -NoProfile -File "$HOOK_SCRIPT" 2>/dev/null || true)
 
 # ------------------------------------------------------------------
 # Parse result
 # ------------------------------------------------------------------
-MASKED=$(printf '%s' "$HOOK_OUTPUT" | jq -r '.hookSpecificOutput.updatedInput.prompt // empty' 2>/dev/null || true)
+MASKED_PATH=$(printf '%s' "$HOOK_OUTPUT" | jq -r '.modifiedArgs.path // .hookSpecificOutput.updatedInput.path // empty' 2>/dev/null || true)
+PERMISSION_DECISION=$(printf '%s' "$HOOK_OUTPUT" | jq -r '.permissionDecision // .hookSpecificOutput.permissionDecision // empty' 2>/dev/null || true)
+PERMISSION_REASON=$(printf '%s' "$HOOK_OUTPUT" | jq -r '.permissionDecisionReason // .hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null || true)
+
+ORIGINAL=$(cat "$FILE_PATH")
+MASKED=""
+if [ -n "$MASKED_PATH" ] && [ -f "$MASKED_PATH" ]; then
+    MASKED=$(cat "$MASKED_PATH")
+fi
 
 # ------------------------------------------------------------------
 # Display
@@ -161,5 +172,9 @@ if [ -n "$MASKED" ]; then
     printf "${GREEN}PASS${RESET} — Sensitive data was detected and masked.\n\n"
 else
     printf "${BOLD}--- Result ---${RESET}\n"
-    printf "${YELLOW}No sensitive data detected.${RESET} Content would be passed through unchanged.\n\n"
+    if [ "$PERMISSION_DECISION" = "deny" ]; then
+        printf "${YELLOW}Hook denied the read:${RESET} %s\n\n" "$PERMISSION_REASON"
+    else
+        printf "${YELLOW}No sensitive data detected.${RESET} Content would be passed through unchanged.\n\n"
+    fi
 fi

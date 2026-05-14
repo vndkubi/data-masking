@@ -14,6 +14,7 @@ RULES:
 "@
 
 $script:LogFile = $null
+$script:MaskDataConfigPath = $null
 
 # Keep one small log file under ~/.copilot so the hook can skip quietly but still explain why.
 function Initialize-Log {
@@ -359,6 +360,7 @@ function Resolve-Config {
             return $null
         }
 
+        $script:MaskDataConfigPath = $candidate
         return $config
     }
 
@@ -713,6 +715,129 @@ function Update-ToolPath {
     return $updated
 }
 
+function Get-ToolCommand {
+    param([System.Collections.IDictionary]$ToolInput)
+
+    foreach ($key in @('command', 'cmd', 'script')) {
+        if ($ToolInput.Contains($key) -and -not [string]::IsNullOrWhiteSpace([string]$ToolInput[$key])) {
+            return [pscustomobject]@{
+                Key = $key
+                Value = [string]$ToolInput[$key]
+            }
+        }
+    }
+
+    return $null
+}
+
+function Update-ToolCommand {
+    param(
+        [System.Collections.IDictionary]$ToolInput,
+        [string]$CommandKey,
+        [string]$NewCommand
+    )
+
+    $updated = Copy-Hashtable -Map $ToolInput
+
+    if ([string]::IsNullOrWhiteSpace($CommandKey)) {
+        $updated['command'] = $NewCommand
+        return $updated
+    }
+
+    $updated[$CommandKey] = $NewCommand
+    return $updated
+}
+
+function Test-ShellTool {
+    param([string]$ToolName)
+
+    return ($ToolName -in @('bash', 'powershell'))
+}
+
+function ConvertTo-Base64Utf8 {
+    param([string]$Text)
+
+    return [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($Text))
+}
+
+function ConvertTo-ForwardSlashPath {
+    param([string]$Path)
+
+    return ($Path -replace '\\', '/')
+}
+
+function Quote-BashArgument {
+    param([string]$Value)
+
+    if ($null -eq $Value) {
+        return "''"
+    }
+
+    return "'" + ($Value -replace "'", "'\''") + "'"
+}
+
+function Quote-PowerShellArgument {
+    param([string]$Value)
+
+    if ($null -eq $Value) {
+        return "''"
+    }
+
+    return "'" + ($Value -replace "'", "''") + "'"
+}
+
+function Get-CommandOutputWrapperPath {
+    param([string]$ScriptDir)
+
+    return (Join-Path $ScriptDir 'mask-command-output.ps1')
+}
+
+function New-MaskedShellCommand {
+    param(
+        [string]$ToolName,
+        [string]$Command,
+        [string]$WrapperPath,
+        [string]$ConfigPath
+    )
+
+    $encodedCommand = ConvertTo-Base64Utf8 -Text $Command
+
+    if ($ToolName -eq 'bash') {
+        $wrapperPathForShell = ConvertTo-ForwardSlashPath -Path $WrapperPath
+        $configPathForShell = ConvertTo-ForwardSlashPath -Path $ConfigPath
+
+        return @(
+            'pwsh',
+            '-NoLogo',
+            '-NoProfile',
+            '-File',
+            (Quote-BashArgument -Value $wrapperPathForShell),
+            '-Shell',
+            'bash',
+            '-EncodedCommand',
+            (Quote-BashArgument -Value $encodedCommand),
+            '-ConfigPath',
+            (Quote-BashArgument -Value $configPathForShell)
+        ) -join ' '
+    }
+
+    return @(
+        'powershell',
+        '-NoLogo',
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        (Quote-PowerShellArgument -Value $WrapperPath),
+        '-Shell',
+        'powershell',
+        '-EncodedCommand',
+        (Quote-PowerShellArgument -Value $encodedCommand),
+        '-ConfigPath',
+        (Quote-PowerShellArgument -Value $ConfigPath)
+    ) -join ' '
+}
+
 function Resolve-ToolPath {
     param(
         [string]$ToolPath,
@@ -947,6 +1072,44 @@ switch ($hookEvent) {
             $resolvedPath = Resolve-ToolPath -ToolPath $toolPath -WorkspaceRoot $workspaceRoot
         }
 
+        if (Test-ShellTool -ToolName $toolName) {
+            $toolCommand = Get-ToolCommand -ToolInput $toolInputMap
+
+            if ($null -ne $toolCommand) {
+                $action = Resolve-EnforcementAction -HookEvent $hookEvent -MatchedPatterns $matchedInputPatterns
+                $matchedPatternNames = (Get-PatternDisplayNames -Patterns $matchedInputPatterns) -join ', '
+
+                if ($matchedInputPatterns.Count -gt 0 -and $action -eq 'deny') {
+                    Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason "Sensitive patterns detected in shell input: $matchedPatternNames. Tool execution was denied."
+                    exit 0
+                }
+
+                $wrapperPath = Get-CommandOutputWrapperPath -ScriptDir $scriptDir
+                if (-not (Test-Path $wrapperPath -PathType Leaf)) {
+                    Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason 'Shell output masking wrapper was not found. Tool execution was denied to avoid exposing raw output.'
+                    exit 0
+                }
+
+                if ([string]::IsNullOrWhiteSpace($script:MaskDataConfigPath)) {
+                    Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason 'Masking config path was unavailable. Tool execution was denied to avoid exposing raw output.'
+                    exit 0
+                }
+
+                $maskedShellInput = Convert-ToHashtable -Value (Invoke-MaskValue -Value $toolInputValue -Patterns $patterns)
+                $maskedToolCommand = Get-ToolCommand -ToolInput $maskedShellInput
+                if ($null -eq $maskedToolCommand) {
+                    Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason 'Shell command field was unavailable after masking. Tool execution was denied to avoid exposing raw output.'
+                    exit 0
+                }
+
+                $wrappedCommand = New-MaskedShellCommand -ToolName $toolName -Command $maskedToolCommand.Value -WrapperPath $wrapperPath -ConfigPath $script:MaskDataConfigPath
+                $modifiedShellArgs = Update-ToolCommand -ToolInput $maskedShellInput -CommandKey $maskedToolCommand.Key -NewCommand $wrappedCommand
+
+                Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason "Shell command output will be masked before it is returned to the model." -ModifiedArgs $modifiedShellArgs
+                exit 0
+            }
+        }
+
         if ([regex]::IsMatch($toolName, $externalToolsRegex, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase) -and $matchedInputPatterns.Count -gt 0) {
             $modifiedExternalArgs = Convert-ToHashtable -Value (Invoke-MaskValue -Value $toolInputValue -Patterns $patterns)
             $action = Resolve-EnforcementAction -HookEvent $hookEvent -MatchedPatterns $matchedInputPatterns
@@ -993,17 +1156,11 @@ switch ($hookEvent) {
                         exit 0
                     }
 
-                    if ($toolName -eq 'view') {
-                        $maskedPath = Get-MaskedTempPath -SourcePath $resolvedPath
-                        Write-Utf8File -Path $maskedPath -Content $maskedContent
-                        $modifiedPathArgs = Update-ToolPath -ToolInput $toolInputMap -NewPath $maskedPath
+                    $maskedPath = Get-MaskedTempPath -SourcePath $resolvedPath
+                    Write-Utf8File -Path $maskedPath -Content $maskedContent
+                    $modifiedPathArgs = Update-ToolPath -ToolInput $toolInputMap -NewPath $maskedPath
 
-                        Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason 'Sensitive data was detected in file content. The read was redirected to a masked temporary copy.' -ModifiedArgs $modifiedPathArgs
-                        exit 0
-                    }
-
-                    $maskedContentPreview = Get-PreviewText -Text $maskedContent
-                    Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason "Sensitive data was detected in file content. Best-effort masked preview:`n$maskedContentPreview"
+                    Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason 'Sensitive data was detected in file content. The read was redirected to a masked temporary copy.' -ModifiedArgs $modifiedPathArgs
                     exit 0
                 }
             }

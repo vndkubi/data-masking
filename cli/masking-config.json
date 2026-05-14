@@ -6,19 +6,28 @@
       "name": "Credit Card",
       "enabled": true,
       "regex": "\\b(?:\\d{4}[- ]?){3}\\d{4}\\b",
-      "replacement": "[MASKED-CC]"
+      "replacement": "[MASKED-CC]",
+      "enforcement": {
+        "UserPromptSubmit": "stop"
+      }
     },
     {
       "name": "API Key",
       "enabled": true,
       "regex": "(?i)\\b(?:sk|pk|rk|token|api[_-]?key)[-_=: ]*[A-Za-z0-9._\\-]{12,}\\b",
-      "replacement": "[MASKED-KEY]"
+      "replacement": "[MASKED-KEY]",
+      "enforcement": {
+        "UserPromptSubmit": "stop"
+      }
     },
     {
       "name": "Bearer Token",
       "enabled": true,
       "regex": "(?i)Bearer\\s+[A-Za-z0-9._\\-]{10,}",
-      "replacement": "Bearer [MASKED-TOKEN]"
+      "replacement": "Bearer [MASKED-TOKEN]",
+      "enforcement": {
+        "UserPromptSubmit": "stop"
+      }
     },
     {
       "name": "Password Assignment",
@@ -26,8 +35,7 @@
       "regex": "(?i)\\b(password|passwd|secret|pwd)\\b\\s*[:=]\\s*[^,\\s\"'}]{4,}",
       "replacement": "$1=[MASKED-PASS]",
       "enforcement": {
-        "UserPromptSubmit": "stop",
-        "PreToolUse": "deny"
+        "UserPromptSubmit": "stop"
       }
     }
   ],
@@ -36,7 +44,10 @@
       "name": "Demo Customer ID",
       "enabled": true,
       "regex": "(?i)(\"?customer_id\"?\\s*[:=]\\s*\"?)CUST-\\d{6,}",
-      "replacement": "$1[MASKED-CUSTOMER-ID]"
+      "replacement": "$1[MASKED-CUSTOMER-ID]",
+      "enforcement": {
+        "UserPromptSubmit": "stop"
+      }
     }
   ]
 }
