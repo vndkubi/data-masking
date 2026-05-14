@@ -1044,26 +1044,169 @@ function Get-ToolReadContent {
     }
 }
 
-function Get-MaskedTempPath {
-    param([string]$SourcePath)
+function Get-StableHash {
+    param(
+        [string]$Text,
+        [int]$Length = 12
+    )
 
     $sha256 = [System.Security.Cryptography.SHA256]::Create()
     try {
-        $hashBytes = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($SourcePath))
+        $hashBytes = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Text))
     } finally {
         $sha256.Dispose()
     }
-    $hash = ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
-    $extension = [System.IO.Path]::GetExtension($SourcePath)
 
-    if ([string]::IsNullOrWhiteSpace($extension)) {
-        $extension = '.txt'
+    $hash = ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
+    if ($Length -gt 0 -and $Length -lt $hash.Length) {
+        return $hash.Substring(0, $Length)
     }
 
-    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'copilot-mask-cache'
-    [System.IO.Directory]::CreateDirectory($tempRoot) | Out-Null
+    return $hash
+}
 
-    return (Join-Path $tempRoot ("masked-$hash$extension"))
+function Get-RelativePathUnderRoot {
+    param(
+        [string]$Path,
+        [string]$Root
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) {
+        return $null
+    }
+
+    try {
+        $fullPath = [System.IO.Path]::GetFullPath($Path)
+        $fullRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+        $rootWithSeparator = $fullRoot + [System.IO.Path]::DirectorySeparatorChar
+        $rootUri = New-Object System.Uri($rootWithSeparator)
+        $pathUri = New-Object System.Uri($fullPath)
+
+        if ($rootUri.Scheme -ne $pathUri.Scheme) {
+            return $null
+        }
+
+        $relativeUri = $rootUri.MakeRelativeUri($pathUri)
+        $relativePath = [System.Uri]::UnescapeDataString($relativeUri.ToString()).Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+
+        if ($relativePath.StartsWith('..')) {
+            return $null
+        }
+
+        return $relativePath
+    } catch {
+        return $null
+    }
+}
+
+function ConvertTo-SafePathSegment {
+    param(
+        [string]$Segment,
+        [System.Collections.IEnumerable]$Patterns
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Segment)) {
+        return '_'
+    }
+
+    $maskedSegment = Invoke-MaskText -Text $Segment -Patterns $Patterns
+    $safeSegment = $maskedSegment
+
+    foreach ($invalidChar in [System.IO.Path]::GetInvalidFileNameChars()) {
+        $safeSegment = $safeSegment.Replace([string]$invalidChar, '_')
+    }
+
+    $safeSegment = ($safeSegment -replace '\s+', '_').Trim()
+    $safeSegment = $safeSegment.TrimEnd('.', ' ')
+    if ([string]::IsNullOrWhiteSpace($safeSegment)) {
+        $safeSegment = 'masked'
+    }
+
+    if ($safeSegment -ne $Segment) {
+        $shortHash = Get-StableHash -Text $Segment -Length 8
+        $extension = [System.IO.Path]::GetExtension($safeSegment)
+        $baseName = [System.IO.Path]::GetFileNameWithoutExtension($safeSegment)
+
+        if ([string]::IsNullOrWhiteSpace($baseName)) {
+            $baseName = 'masked'
+        }
+
+        return "$baseName-$shortHash$extension"
+    }
+
+    return $safeSegment
+}
+
+function ConvertTo-SafeRelativePath {
+    param(
+        [string]$RelativePath,
+        [System.Collections.IEnumerable]$Patterns
+    )
+
+    $parts = @($RelativePath -split '[\\/]' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($parts.Count -eq 0) {
+        return $null
+    }
+
+    $safeParts = @()
+    foreach ($part in $parts) {
+        $safeParts += (ConvertTo-SafePathSegment -Segment $part -Patterns $Patterns)
+    }
+
+    return ($safeParts -join [System.IO.Path]::DirectorySeparatorChar)
+}
+
+function Get-MaskedTempPath {
+    param(
+        [string]$SourcePath,
+        [string]$WorkspaceRoot,
+        [System.Collections.IEnumerable]$Patterns,
+        [string]$MaskedPathMode,
+        [string]$MaskedMirrorRoot
+    )
+
+    if ($MaskedPathMode -eq 'tempHash' -or [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+        $hash = Get-StableHash -Text $SourcePath -Length 64
+        $extension = [System.IO.Path]::GetExtension($SourcePath)
+
+        if ([string]::IsNullOrWhiteSpace($extension)) {
+            $extension = '.txt'
+        }
+
+        $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'copilot-mask-cache'
+        [System.IO.Directory]::CreateDirectory($tempRoot) | Out-Null
+
+        return (Join-Path $tempRoot ("masked-$hash$extension"))
+    }
+
+    $mirrorRoot = if ([System.IO.Path]::IsPathRooted($MaskedMirrorRoot)) {
+        $MaskedMirrorRoot
+    } else {
+        Join-Path $WorkspaceRoot $MaskedMirrorRoot
+    }
+
+    $relativePath = Get-RelativePathUnderRoot -Path $SourcePath -Root $WorkspaceRoot
+    if ([string]::IsNullOrWhiteSpace($relativePath)) {
+        $relativePath = (Join-Path (Get-StableHash -Text $SourcePath -Length 12) ([System.IO.Path]::GetFileName($SourcePath)))
+    }
+
+    $safeRelativePath = ConvertTo-SafeRelativePath -RelativePath $relativePath -Patterns $Patterns
+    if ([string]::IsNullOrWhiteSpace($safeRelativePath)) {
+        $extension = [System.IO.Path]::GetExtension($SourcePath)
+        if ([string]::IsNullOrWhiteSpace($extension)) {
+            $extension = '.txt'
+        }
+
+        $safeRelativePath = "masked-$(Get-StableHash -Text $SourcePath -Length 12)$extension"
+    }
+
+    $maskedPath = Join-Path $mirrorRoot $safeRelativePath
+    $maskedParent = Split-Path -Parent $maskedPath
+    if (-not [string]::IsNullOrWhiteSpace($maskedParent)) {
+        [System.IO.Directory]::CreateDirectory($maskedParent) | Out-Null
+    }
+
+    return $maskedPath
 }
 
 function Write-Utf8File {
@@ -1124,6 +1267,8 @@ $sensitiveFilenameRegex = if ($config.Contains('sensitiveFilenameRegex')) { [str
 $sensitiveFilenameValidator = if ($config.Contains('sensitiveFilenameValidator')) { [string]$config['sensitiveFilenameValidator'] } else { '' }
 $denyPathRegex = if ($config.Contains('denyPathRegex')) { [string]$config['denyPathRegex'] } else { '(^|[\\/])(\.env[^\\/]*|.*\.(pem|key|p12|pfx|crt|cer|der|sql|dump|bak|backup|csv|tsv|xlsx|xls|parquet|avro|har|log))$|(^|[\\/])(data|exports|dumps|logs|fixtures[\\/]prod|prod-fixtures|customer-data|payment-data)([\\/]|$)' }
 $denyShellCommandRegex = if ($config.Contains('denyShellCommandRegex')) { [string]$config['denyShellCommandRegex'] } else { '(?i)\b(curl|wget|Invoke-WebRequest|Invoke-RestMethod|iwr|irm|scp|sftp|ftp|nc|ncat|telnet|rsync|aws\s+s3|az\s+storage|gcloud\s+(storage|compute)|gh\s+gist|pastebinit)\b' }
+$maskedPathMode = if ($config.Contains('maskedPathMode') -and -not [string]::IsNullOrWhiteSpace([string]$config['maskedPathMode'])) { [string]$config['maskedPathMode'] } else { 'workspaceMirror' }
+$maskedMirrorRoot = if ($config.Contains('maskedMirrorRoot') -and -not [string]::IsNullOrWhiteSpace([string]$config['maskedMirrorRoot'])) { [string]$config['maskedMirrorRoot'] } else { '.copilot/masked-data' }
 
 switch ($hookEvent) {
     'SessionStart' {
@@ -1276,11 +1421,11 @@ switch ($hookEvent) {
             if ($toolName -in @('view', 'read_file', 'readFile') -and -not [string]::IsNullOrWhiteSpace($resolvedPath) -and (Test-Path $resolvedPath -PathType Leaf)) {
                 $pathContent = Get-Content -Path $resolvedPath -Raw -Encoding UTF8
                 $maskedPathContent = Invoke-MaskText -Text $pathContent -Patterns $patterns
-                $maskedPath = Get-MaskedTempPath -SourcePath $resolvedPath
+                $maskedPath = Get-MaskedTempPath -SourcePath $resolvedPath -WorkspaceRoot $workspaceRoot -Patterns $patterns -MaskedPathMode $maskedPathMode -MaskedMirrorRoot $maskedMirrorRoot
                 Write-Utf8File -Path $maskedPath -Content $maskedPathContent
                 $modifiedPathArgs = Update-ToolPath -ToolInput $toolInputMap -NewPath $maskedPath
 
-                Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason 'Sensitive numeric filename was redirected to a masked temporary copy.' -ModifiedArgs $modifiedPathArgs
+                Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason 'Sensitive numeric filename was redirected to a stable masked mirror copy.' -ModifiedArgs $modifiedPathArgs
                 exit 0
             }
 
@@ -1304,11 +1449,11 @@ switch ($hookEvent) {
                         exit 0
                     }
 
-                    $maskedPath = Get-MaskedTempPath -SourcePath $resolvedPath
+                    $maskedPath = Get-MaskedTempPath -SourcePath $resolvedPath -WorkspaceRoot $workspaceRoot -Patterns $patterns -MaskedPathMode $maskedPathMode -MaskedMirrorRoot $maskedMirrorRoot
                     Write-Utf8File -Path $maskedPath -Content $maskedContent
                     $modifiedPathArgs = Update-ToolPath -ToolInput $toolInputMap -NewPath $maskedPath
 
-                    Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason 'Sensitive data was detected in file content. The read was redirected to a masked temporary copy.' -ModifiedArgs $modifiedPathArgs
+                    Write-DecisionOutput -HookEvent $hookEvent -Decision 'allow' -Reason 'Sensitive data was detected in file content. The read was redirected to a stable masked mirror copy.' -ModifiedArgs $modifiedPathArgs
                     exit 0
                 }
             }

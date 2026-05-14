@@ -3,3 +3,9 @@ logs/
 .github/hooks/logs/
 cli/logs/
 .github/hooks/.masked-files.json
+**/.copilot/masked-data/
+**/.copilot/hooks/sensitive-data-mask.json
+**/.copilot/masking-config.json
+
+# Temporary masked aliases (invoke-mask / invoke-restore)
+masked-*

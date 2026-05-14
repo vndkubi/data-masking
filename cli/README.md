@@ -27,18 +27,41 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\cli\install.ps1
 pwsh ./cli/install.ps1
 ```
 
+For the PCI/DSS `workspaceMirror` mode, prefer installing with the active repository root so the generated hook has the correct `cwd` and can create stable `.copilot/masked-data` mirror paths:
+
+```powershell
+# Windows PowerShell 5.1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\cli\install.ps1 -WorkspaceRoot (Resolve-Path .)
+
+# macOS / Linux / WSL
+pwsh ./cli/install.ps1 -WorkspaceRoot "$(pwd)"
+```
+
 The installer creates or updates:
 
 ```text
 ~/.copilot/
   masking-config.json
   hooks/
-    sensitive-data-mask.json
     scripts/
       mask-sensitive-data.ps1
       mask-command-output.ps1
   logs/
 ```
+
+Without `-WorkspaceRoot`, the installer also writes a global hook config at `~/.copilot/hooks/sensitive-data-mask.json`.
+
+When `-WorkspaceRoot` is provided, the installer also creates or updates local workspace files:
+
+```text
+<workspace>/.copilot/
+  masking-config.json
+  hooks/
+    sensitive-data-mask.json
+  masked-data/
+```
+
+The workspace hook points at the globally installed script but sets `cwd` to the workspace root. This is the recommended setup for legacy PCI mock repositories because relative tool paths resolve correctly and masked mirror paths stay reusable for the agent. The generated workspace hook/config and `masked-data/` mirror are added to `.gitignore` unless `-NoWorkspaceGitignore` is used.
 
 Existing target files are backed up with a `.bak-YYYYMMDD-HHMMSS` suffix before they are overwritten. Use `-NoBackup` to skip backups:
 
@@ -50,6 +73,7 @@ Use a custom target to test without touching the real Copilot directory:
 
 ```powershell
 .\cli\install.ps1 -CopilotHome "$HOME/.copilot-test"
+.\cli\install.ps1 -CopilotHome "$HOME/.copilot-test" -WorkspaceRoot (Resolve-Path .)
 ```
 
 Validate the config without installing anything:
@@ -65,9 +89,11 @@ Validate the config without installing anything:
 Top-level policy controls:
 
 - `externalToolsRegex`: tool names whose hook-visible inputs should be treated as outbound/external.
+- `maskedPathMode`: masked read-path strategy. Use `workspaceMirror` for stable repo-local mirror paths, or `tempHash` for the older opaque temp-cache path.
+- `maskedMirrorRoot`: workspace-relative or absolute mirror root used when `maskedPathMode` is `workspaceMirror`. The bundled config uses `.copilot/masked-data`.
 - `sensitiveFilenameRegex`: path/filename candidate matcher. The bundled config looks for 13-19 digit PAN candidates anywhere in the path.
 - `sensitiveFilenameValidator`: optional extra check for `sensitiveFilenameRegex`. The bundled config uses `luhn`, so numeric filenames are treated as sensitive only when the candidate looks like a payment card PAN.
-- `denyPathRegex`: optional file path deny policy. The bundled CLI config leaves this empty so read tools can be redirected to masked temp files instead of being denied.
+- `denyPathRegex`: optional file path deny policy. The bundled CLI config leaves this empty so read tools can be redirected to masked mirror files instead of being denied.
 - `denyShellCommandRegex`: shell commands denied before execution because they can upload raw local files or exfiltrate data outside the masking flow, such as `curl --data-binary @file`, `scp`, `aws s3`, and gist upload commands.
 
 Pattern-level controls:
@@ -164,13 +190,22 @@ When multiple patterns match in the same event, the most restrictive configured 
 
 The PAN rule is intentionally two-stage: regex finds 13-19 digit candidates, then Luhn validation decides whether to mask. This avoids masking most long numeric IDs, but it is still a heuristic because some non-card IDs can pass Luhn by chance.
 
-Avoid using PANs as mock-data filenames when possible. Prefer safe aliases such as `visa-valid-01.json` and put test PANs inside the file content. If a repository already has PAN-like filenames, use file-read tools rather than arbitrary shell commands: `read_file` and `view` can be redirected to a masked temp path, while shell commands that list or pass filenames may expose only masked aliases that are not reusable paths.
+Avoid using PANs as mock-data filenames when possible. Prefer safe aliases such as `visa-valid-01.json` and put test PANs inside the file content.
+
+For legacy repositories with thousands of PAN-like mock filenames, do not bulk rename just to make Copilot usable. With `maskedPathMode: "workspaceMirror"`, file-read tools such as `read_file` and `view` are redirected to stable masked mirror paths under `.copilot/masked-data`. The mirror preserves the relative directory structure and replaces sensitive filename segments with safe aliases plus a short hash, for example:
+
+```text
+fixtures/cards/4111111111111111.json
+-> .copilot/masked-data/fixtures/cards/[MASKED-PAN]-4247e268.json
+```
+
+This lets the agent reuse the redirected path without exposing the original PAN filename. Keep `.copilot/masked-data/` out of source control.
 
 ## Hook Behavior
 
 - `SessionStart`: emits the masking policy context.
 - `UserPromptSubmit`: scans the prompt text only. Bundled sensitive patterns configure `mask`, so the prompt is not stopped; the hook emits a masked advisory preview.
-- `PreToolUse`: the primary masking point. File-read tools are redirected to masked temporary copies when matching content is detected. Shell tools such as `bash`, `powershell`, `run_in_terminal`, `runInTerminal`, and `terminal` are wrapped through `mask-command-output.ps1` so stdout/stderr is masked before returning to the model. Commands matching `denyShellCommandRegex` are denied because they can send raw local files outside the hook-visible output path.
+- `PreToolUse`: the primary masking point. File-read tools are redirected to stable masked mirror copies when matching content or sensitive filenames are detected. Shell tools such as `bash`, `powershell`, `run_in_terminal`, `runInTerminal`, and `terminal` are wrapped through `mask-command-output.ps1` so stdout/stderr is masked before returning to the model. Commands matching `denyShellCommandRegex` are denied because they can send raw local files outside the hook-visible output path.
 - `PermissionRequest`: CLI-only advisory layer. Bundled sensitive patterns configure `mask`, so permission payloads are not denied by pattern matches.
 - `PostToolUse` and `PostToolUseFailure`: leak detection after tool execution. Bundled sensitive patterns configure `mask`, so the hook emits masked additional context instead of blocking. For file-read tools such as `read_file` and `view`, the hook can re-check the requested file path when the `PostToolUse` payload does not include the tool result body.
 - `PreCompact`: emits a best-effort reminder before compaction.
@@ -180,7 +215,7 @@ Avoid using PANs as mock-data filenames when possible. Prefer safe aliases such 
 
 The practical behavior split is:
 
-1. `PreToolUse` can still rewrite hook-visible tool input and redirect reads to masked temp files.
+1. `PreToolUse` can still rewrite hook-visible tool input and redirect reads to masked mirror files.
 2. Shell command policy denies known raw file upload/exfiltration commands before execution. This is a regex guardrail, not a full DLP engine; extend `denyShellCommandRegex` for your environment.
 3. `PostToolUse` is later and therefore less reliable for prevention; keep sensitive reads on tools that `PreToolUse` can redirect or shell commands whose stdout/stderr wrapper can mask.
 4. Later events are otherwise advisory and best-effort only.

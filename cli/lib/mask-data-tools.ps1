@@ -355,6 +355,13 @@ function Test-MaskDataConfig {
         }
     }
 
+    if ($config.Contains('maskedPathMode') -and -not [string]::IsNullOrWhiteSpace([string]$config['maskedPathMode'])) {
+        $maskedPathMode = [string]$config['maskedPathMode']
+        if ($maskedPathMode -notin @('workspaceMirror', 'tempHash')) {
+            [void]$errors.Add("maskedPathMode '$maskedPathMode' is unsupported. Allowed: workspaceMirror, tempHash")
+        }
+    }
+
     $entries = Get-MaskDataPatternEntries -Config $config
     if ($entries.Count -eq 0) {
         [void]$errors.Add("Config '$resolvedPath' must define at least one item in 'patterns' or 'customPatterns'.")

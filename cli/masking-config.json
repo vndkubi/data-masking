@@ -1,5 +1,7 @@
 {
   "externalToolsRegex": "^(search_web|fetch_webpage|web_fetch|mcp_.*|github_.*|github_repo|task|bash|powershell|run_in_terminal|runInTerminal|terminal|external_api_call)$",
+  "maskedPathMode": "workspaceMirror",
+  "maskedMirrorRoot": ".copilot/masked-data",
   "sensitiveFilenameRegex": "\\d(?:[ -]?\\d){12,18}",
   "sensitiveFilenameValidator": "luhn",
   "denyPathRegex": "",
@@ -36,8 +38,8 @@
     {
       "name": "Card Verification Code Field",
       "enabled": true,
-      "regex": "(?i)\\b(cvv2?|cvc2?|cid|cav2|cvn|card[_ -]?verification[_ -]?(?:code|value)|security[_ -]?code)\\b\\s*[:=]\\s*[\"']?\\d{3,4}\\b",
-      "replacement": "$1=[MASKED-CVV]",
+      "regex": "(?i)([\"']?\\b(?:cvv2?|cvc2?|cid|cav2|cvn|card[_ -]?verification[_ -]?(?:code|value)|security[_ -]?code)\\b[\"']?\\s*[:=]\\s*[\"']?)\\d{3,4}\\b",
+      "replacement": "$1[MASKED-CVV]",
       "enforcement": {
         "UserPromptSubmit": "mask",
         "PreToolUse": "mask",
@@ -50,8 +52,8 @@
     {
       "name": "PIN Block Field",
       "enabled": true,
-      "regex": "(?i)\\b(pin[_ -]?block|encrypted[_ -]?pin)\\b\\s*[:=]\\s*[\"']?[A-F0-9]{8,32}\\b",
-      "replacement": "$1=[MASKED-PIN-BLOCK]",
+      "regex": "(?i)([\"']?\\b(?:pin[_ -]?block|encrypted[_ -]?pin)\\b[\"']?\\s*[:=]\\s*[\"']?)[A-F0-9]{8,32}\\b",
+      "replacement": "$1[MASKED-PIN-BLOCK]",
       "enforcement": {
         "UserPromptSubmit": "mask",
         "PreToolUse": "mask",
@@ -79,8 +81,8 @@
     {
       "name": "Card Expiration Field",
       "enabled": true,
-      "regex": "(?i)\\b(exp(?:iry|iration)?(?:[_ -]?date)?|card[_ -]?exp(?:iry|iration)?)\\b\\s*[:=]\\s*[\"']?(?:0[1-9]|1[0-2])[/\\-]?(?:\\d{2}|20\\d{2})\\b",
-      "replacement": "$1=[MASKED-EXPIRY]",
+      "regex": "(?i)([\"']?\\b(?:exp(?:iry|iration)?(?:[_ -]?date)?|card[_ -]?exp(?:iry|iration)?)\\b[\"']?\\s*[:=]\\s*[\"']?)(?:0[1-9]|1[0-2])[/\\-]?(?:\\d{2}|20\\d{2})\\b",
+      "replacement": "$1[MASKED-EXPIRY]",
       "enforcement": {
         "UserPromptSubmit": "mask",
         "PreToolUse": "mask",
@@ -93,8 +95,8 @@
     {
       "name": "Service Code Field",
       "enabled": true,
-      "regex": "(?i)\\b(service[_ -]?code)\\b\\s*[:=]\\s*[\"']?\\d{3}\\b",
-      "replacement": "$1=[MASKED-SERVICE-CODE]",
+      "regex": "(?i)([\"']?\\bservice[_ -]?code\\b[\"']?\\s*[:=]\\s*[\"']?)\\d{3}\\b",
+      "replacement": "$1[MASKED-SERVICE-CODE]",
       "enforcement": {
         "UserPromptSubmit": "mask",
         "PreToolUse": "mask",
@@ -107,8 +109,8 @@
     {
       "name": "Cardholder Name Field",
       "enabled": true,
-      "regex": "(?i)\\b(cardholder[_ -]?name|name[_ -]?on[_ -]?card)\\b\\s*[:=]\\s*[\"']?.+?(?=[\"']?\\s*(?:[,}\\r\\n]|$)|\\s+(?:track(?:1|2)?|pan|card(?:_?number)?|cvv2?|cvc2?|cid|cav2|cvn|exp(?:iry|iration)?(?:[_ -]?date)?|service[_ -]?code|pin[_ -]?block|email|password|passwd|secret|pwd|api[_-]?key|token|customer[_-]?id)\\s*[:=])",
-      "replacement": "$1=[MASKED-CARDHOLDER-NAME]",
+      "regex": "(?i)([\"']?\\b(?:cardholder[_ -]?name|name[_ -]?on[_ -]?card)\\b[\"']?\\s*[:=]\\s*[\"']?).+?(?=[\"']?\\s*(?:[,}\\r\\n]|$)|\\s+(?:track(?:1|2)?|pan|card(?:_?number)?|cvv2?|cvc2?|cid|cav2|cvn|exp(?:iry|iration)?(?:[_ -]?date)?|service[_ -]?code|pin[_ -]?block|email|password|passwd|secret|pwd|api[_-]?key|token|customer[_-]?id)\\s*[:=])",
+      "replacement": "$1[MASKED-CARDHOLDER-NAME]",
       "enforcement": {
         "UserPromptSubmit": "mask",
         "PreToolUse": "mask",
@@ -177,8 +179,8 @@
     {
       "name": "Password Assignment",
       "enabled": true,
-      "regex": "(?i)\\b(password|passwd|secret|pwd)\\b\\s*[:=]\\s*[^,\\s\"'}]{4,}",
-      "replacement": "$1=[MASKED-PASS]",
+      "regex": "(?i)([\"']?\\b(?:password|passwd|secret|pwd)\\b[\"']?\\s*[:=]\\s*[\"']?)[^,\\s\"'}]{4,}",
+      "replacement": "$1[MASKED-PASS]",
       "enforcement": {
         "UserPromptSubmit": "mask",
         "PreToolUse": "mask",
