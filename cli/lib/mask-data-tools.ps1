@@ -56,11 +56,14 @@ function Resolve-DefaultMaskDataConfigPath {
     }
 
     if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+        $candidates += (Join-Path (Join-Path (Join-Path $WorkspaceRoot 'cli') 'hooks') 'masking-config.json')
         $candidates += (Join-Path (Join-Path $WorkspaceRoot 'cli') 'masking-config.json')
+        $candidates += (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.copilot') 'hooks') 'masking-config.json')
         $candidates += (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.github') 'hooks') 'masking-config.json')
         $candidates += (Join-Path (Join-Path $WorkspaceRoot '.copilot') 'masking-config.json')
     }
 
+    $candidates += (Join-Path (Join-Path (Join-Path $HOME '.copilot') 'hooks') 'masking-config.json')
     $candidates += (Join-Path (Join-Path $HOME '.copilot') 'masking-config.json')
 
     foreach ($candidate in $candidates) {
@@ -69,7 +72,7 @@ function Resolve-DefaultMaskDataConfigPath {
         }
     }
 
-    throw "masking-config.json was not found. Use -ConfigPath or create cli/masking-config.json or .github/hooks/masking-config.json."
+    throw "masking-config.json was not found. Use -ConfigPath or create cli/masking-config.json, cli/hooks/masking-config.json, or .github/hooks/masking-config.json."
 }
 
 function Read-MaskDataConfig {
@@ -359,6 +362,21 @@ function Test-MaskDataConfig {
         $maskedPathMode = [string]$config['maskedPathMode']
         if ($maskedPathMode -notin @('workspaceMirror', 'tempHash')) {
             [void]$errors.Add("maskedPathMode '$maskedPathMode' is unsupported. Allowed: workspaceMirror, tempHash")
+        }
+    }
+
+    if ($config.Contains('userPromptSubmitUnsupportedMode') -and -not [string]::IsNullOrWhiteSpace([string]$config['userPromptSubmitUnsupportedMode'])) {
+        $userPromptSubmitUnsupportedMode = [string]$config['userPromptSubmitUnsupportedMode']
+        if ($userPromptSubmitUnsupportedMode -notin @('continue', 'block')) {
+            [void]$errors.Add("userPromptSubmitUnsupportedMode '$userPromptSubmitUnsupportedMode' is unsupported. Allowed: continue, block")
+        }
+    }
+
+    if ($config.Contains('blockedPaths') -and $null -ne $config['blockedPaths']) {
+        foreach ($blockedPath in @($config['blockedPaths'])) {
+            if ([string]::IsNullOrWhiteSpace([string]$blockedPath)) {
+                [void]$errors.Add("blockedPaths entries must be non-empty strings.")
+            }
         }
     }
 

@@ -97,6 +97,56 @@ function Write-DecisionOutput {
     Write-HookOutput $payload
 }
 
+function Write-FailClosedOutput {
+    param(
+        [string]$HookEvent = 'unknown',
+        [string]$Reason = 'Security hook failed closed to avoid exposing unmasked data.'
+    )
+
+    if ([string]::IsNullOrWhiteSpace($HookEvent)) {
+        $HookEvent = 'unknown'
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Reason)) {
+        $Reason = 'Security hook failed closed to avoid exposing unmasked data.'
+    }
+
+    switch ($HookEvent) {
+        'PreToolUse' {
+            Write-DecisionOutput -HookEvent $HookEvent -Decision 'deny' -Reason $Reason
+            return
+        }
+
+        'PermissionRequest' {
+            Write-PermissionRequestDecision -Behavior 'deny' -Message $Reason -Interrupt
+            return
+        }
+
+        'PostToolUse' {
+            Write-PostToolUseContextOutput -SystemMessage $Reason -AdditionalContext $Reason -Block -Reason $Reason
+            return
+        }
+
+        { $_ -in @('Stop', 'SubagentStop') } {
+            Write-StopContextOutput -HookEvent $HookEvent -SystemMessage $Reason -Reason $Reason -Block
+            return
+        }
+
+        default {
+            Write-HookOutput @{
+                continue           = $false
+                stopReason         = $Reason
+                systemMessage      = $Reason
+                hookSpecificOutput = @{
+                    hookEventName     = $HookEvent
+                    additionalContext = $Reason
+                }
+            }
+            return
+        }
+    }
+}
+
 function Write-CommonStopOutput {
     param(
         [string]$Reason,
@@ -110,6 +160,46 @@ function Write-CommonStopOutput {
     if (-not [string]::IsNullOrWhiteSpace($Reason)) {
         $payload['continue'] = $false
         $payload['stopReason'] = $Reason
+    }
+
+    Write-HookOutput $payload
+}
+
+function Write-UserPromptMaskOutput {
+    param(
+        [string]$MaskedPrompt,
+        [string]$MatchedPatternNames,
+        [string]$UnsupportedMode = 'continue',
+        [switch]$Stop
+    )
+
+    $maskedPreview = Get-PreviewText -Text $MaskedPrompt
+    $context = "SECURITY: The submitted prompt matched masking-config.json ($MatchedPatternNames). Use this masked prompt instead of the raw prompt:`n$MaskedPrompt"
+    $payload = @{
+        modifiedPrompt     = $MaskedPrompt
+        additionalContext  = $context
+        systemMessage      = "Sensitive data detected in the prompt field. Masked prompt:`n$maskedPreview"
+        hookSpecificOutput = @{
+            hookEventName     = 'UserPromptSubmit'
+            modifiedPrompt    = $MaskedPrompt
+            additionalContext = $context
+        }
+    }
+
+    if ($Stop) {
+        $stopReason = "Security policy blocked this prompt before it was sent to the model because it matched masking-config.json ($MatchedPatternNames). Remove the sensitive value or replace it with a [MASKED-*] placeholder, then submit again."
+        $payload['continue'] = $false
+        $payload['stopReason'] = $stopReason
+        $payload['systemMessage'] = $stopReason
+        $payload['suppressOutput'] = $true
+    } elseif ($UnsupportedMode -eq 'block') {
+        $blockReason = "Security policy blocked this prompt before it was sent to the model because it matched masking-config.json ($MatchedPatternNames). Remove the sensitive value or replace it with the masked placeholder, then submit again.`nMasked prompt:`n$maskedPreview"
+        $payload['decision'] = 'block'
+        $payload['reason'] = $blockReason
+        $payload['continue'] = $false
+        $payload['stopReason'] = $blockReason
+        $payload['systemMessage'] = $blockReason
+        $payload['suppressOutput'] = $true
     }
 
     Write-HookOutput $payload
@@ -330,7 +420,8 @@ function Resolve-Config {
         [string]$HookEvent
     )
 
-    $copilotHome = Split-Path -Parent (Split-Path -Parent $ScriptDir)
+    $hookDir = Split-Path -Parent $ScriptDir
+    $copilotHome = Split-Path -Parent $hookDir
     $candidates = @()
 
     if ($env:MASK_DATA_CONFIG) {
@@ -338,10 +429,12 @@ function Resolve-Config {
     }
 
     if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+        $candidates += (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.copilot') 'hooks') 'masking-config.json')
         $candidates += (Join-Path (Join-Path $WorkspaceRoot '.copilot') 'masking-config.json')
         $candidates += (Join-Path (Join-Path (Join-Path $WorkspaceRoot '.github') 'hooks') 'masking-config.json')
     }
 
+    $candidates += (Join-Path $hookDir 'masking-config.json')
     $candidates += (Join-Path $copilotHome 'masking-config.json')
 
     foreach ($candidate in $candidates) {
@@ -783,13 +876,86 @@ function Resolve-EnforcementAction {
     return $selectedAction
 }
 
+function Resolve-UserPromptUnsupportedMode {
+    param([System.Collections.IDictionary]$Config)
+
+    $mode = ''
+    if (-not [string]::IsNullOrWhiteSpace($env:MASK_DATA_USER_PROMPT_UNSUPPORTED_MODE)) {
+        $mode = [string]$env:MASK_DATA_USER_PROMPT_UNSUPPORTED_MODE
+    } elseif ($Config.Contains('userPromptSubmitUnsupportedMode')) {
+        $mode = [string]$Config['userPromptSubmitUnsupportedMode']
+    }
+
+    switch ($mode.ToLowerInvariant()) {
+        'block' { return 'block' }
+        'stop' { return 'block' }
+        default { return 'continue' }
+    }
+}
+
+function Add-ToolPathCandidate {
+    param(
+        [System.Collections.ArrayList]$Paths,
+        $Value
+    )
+
+    if ($null -eq $Value) {
+        return
+    }
+
+    if ($Value -is [string]) {
+        if (-not [string]::IsNullOrWhiteSpace($Value)) {
+            [void]$Paths.Add($Value)
+        }
+        return
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        foreach ($path in @(Get-ToolPaths -ToolInput $Value)) {
+            [void]$Paths.Add($path)
+        }
+        return
+    }
+
+    if ($Value -is [System.Collections.IEnumerable]) {
+        foreach ($item in $Value) {
+            Add-ToolPathCandidate -Paths $Paths -Value $item
+        }
+    }
+}
+
+function Get-ToolPaths {
+    param([System.Collections.IDictionary]$ToolInput)
+
+    $paths = New-Object System.Collections.ArrayList
+    if ($null -eq $ToolInput) {
+        return @()
+    }
+
+    foreach ($key in @('filePath', 'file_path', 'filePaths', 'file_paths', 'path', 'paths', 'file', 'files', 'filename')) {
+        if ($ToolInput.Contains($key)) {
+            Add-ToolPathCandidate -Paths $paths -Value $ToolInput[$key]
+        }
+    }
+
+    foreach ($key in $ToolInput.Keys) {
+        $value = $ToolInput[$key]
+        if ($value -is [System.Collections.IDictionary]) {
+            foreach ($path in @(Get-ToolPaths -ToolInput $value)) {
+                [void]$paths.Add($path)
+            }
+        }
+    }
+
+    return ,@($paths.ToArray() | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
+}
+
 function Get-ToolPath {
     param([System.Collections.IDictionary]$ToolInput)
 
-    foreach ($key in @('filePath', 'file_path', 'path')) {
-        if ($ToolInput.Contains($key) -and -not [string]::IsNullOrWhiteSpace([string]$ToolInput[$key])) {
-            return [string]$ToolInput[$key]
-        }
+    $paths = @(Get-ToolPaths -ToolInput $ToolInput)
+    if ($paths.Count -gt 0) {
+        return [string]$paths[0]
     }
 
     return $null
@@ -992,6 +1158,180 @@ function Resolve-ToolPath {
     }
 
     return (Join-Path $WorkspaceRoot $ToolPath)
+}
+
+function Normalize-PolicyPath {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return ''
+    }
+
+    try {
+        $normalized = [System.IO.Path]::GetFullPath($Path)
+    } catch {
+        $normalized = $Path
+    }
+
+    $normalized = $normalized.Replace([System.IO.Path]::AltDirectorySeparatorChar, [System.IO.Path]::DirectorySeparatorChar)
+    $normalized = $normalized.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+        return ''
+    }
+
+    if ([System.IO.Path]::DirectorySeparatorChar -eq '\') {
+        return $normalized.ToLowerInvariant()
+    }
+
+    return $normalized
+}
+
+function Test-PolicyPathHasWildcard {
+    param([string]$Path)
+
+    return (-not [string]::IsNullOrWhiteSpace($Path) -and $Path.IndexOfAny([char[]]'*?[') -ge 0)
+}
+
+function Test-PolicyWildcardMatch {
+    param(
+        [string]$Text,
+        [string]$Pattern
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text) -or [string]::IsNullOrWhiteSpace($Pattern)) {
+        return $false
+    }
+
+    $options = [System.Management.Automation.WildcardOptions]::Compiled
+    if ([System.IO.Path]::DirectorySeparatorChar -eq '\') {
+        $options = $options -bor [System.Management.Automation.WildcardOptions]::IgnoreCase
+    }
+
+    return ([System.Management.Automation.WildcardPattern]::new($Pattern, $options).IsMatch($Text))
+}
+
+function Test-PolicyPathMatch {
+    param(
+        [string]$CandidatePath,
+        [string]$PolicyPath,
+        [bool]$HasWildcard = $false
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CandidatePath) -or [string]::IsNullOrWhiteSpace($PolicyPath)) {
+        return $false
+    }
+
+    if ($HasWildcard) {
+        return (Test-PolicyWildcardMatch -Text $CandidatePath -Pattern $PolicyPath)
+    }
+
+    return ($CandidatePath -eq $PolicyPath -or $CandidatePath.StartsWith($PolicyPath + [System.IO.Path]::DirectorySeparatorChar))
+}
+
+function Get-ConfiguredBlockedPaths {
+    param(
+        [System.Collections.IDictionary]$Config,
+        [string]$WorkspaceRoot
+    )
+
+    $blockedPaths = New-Object System.Collections.ArrayList
+    if (-not $Config.Contains('blockedPaths') -or $null -eq $Config['blockedPaths']) {
+        return @()
+    }
+
+    foreach ($pathValue in @($Config['blockedPaths'])) {
+        $path = [string]$pathValue
+        if ([string]::IsNullOrWhiteSpace($path)) {
+            continue
+        }
+
+        $hasWildcard = Test-PolicyPathHasWildcard -Path $path
+        $resolvedPath = $path
+        if (-not [System.IO.Path]::IsPathRooted($resolvedPath) -and -not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+            $resolvedPath = Join-Path $WorkspaceRoot $resolvedPath
+        }
+
+        $normalizedPath = Normalize-PolicyPath -Path $resolvedPath
+        if ([string]::IsNullOrWhiteSpace($normalizedPath)) {
+            continue
+        }
+
+        [void]$blockedPaths.Add([pscustomobject]@{
+            Original     = $path
+            Resolved     = $resolvedPath
+            Normalized   = $normalizedPath
+            ForwardSlash = (ConvertTo-ForwardSlashPath -Path $resolvedPath)
+            HasWildcard  = $hasWildcard
+        })
+    }
+
+    return ,@($blockedPaths.ToArray())
+}
+
+function Get-BlockedPathMatch {
+    param(
+        [string]$CandidatePath,
+        [object[]]$BlockedPaths,
+        [string]$WorkspaceRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CandidatePath) -or $null -eq $BlockedPaths -or $BlockedPaths.Count -eq 0) {
+        return $null
+    }
+
+    $resolvedCandidate = Resolve-ToolPath -ToolPath $CandidatePath -WorkspaceRoot $WorkspaceRoot
+    $normalizedCandidate = Normalize-PolicyPath -Path $resolvedCandidate
+    if ([string]::IsNullOrWhiteSpace($normalizedCandidate)) {
+        return $null
+    }
+
+    foreach ($blockedPath in $BlockedPaths) {
+        $normalizedBlockedPath = [string]$blockedPath.Normalized
+        if ([string]::IsNullOrWhiteSpace($normalizedBlockedPath)) {
+            continue
+        }
+
+        if (Test-PolicyPathMatch -CandidatePath $normalizedCandidate -PolicyPath $normalizedBlockedPath -HasWildcard ([bool]$blockedPath.HasWildcard)) {
+            return $blockedPath
+        }
+    }
+
+    return $null
+}
+
+function Get-BlockedCommandPathMatch {
+    param(
+        [string]$Command,
+        [object[]]$BlockedPaths
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Command) -or $null -eq $BlockedPaths -or $BlockedPaths.Count -eq 0) {
+        return $null
+    }
+
+    $comparison = [StringComparison]::Ordinal
+    if ([System.IO.Path]::DirectorySeparatorChar -eq '\') {
+        $comparison = [StringComparison]::OrdinalIgnoreCase
+    }
+
+    foreach ($blockedPath in $BlockedPaths) {
+        foreach ($candidate in @($blockedPath.Original, $blockedPath.Resolved, $blockedPath.ForwardSlash)) {
+            if ([string]::IsNullOrWhiteSpace([string]$candidate)) {
+                continue
+            }
+
+            if ([bool]$blockedPath.HasWildcard) {
+                $commandGlob = "*$candidate*"
+                if (Test-PolicyWildcardMatch -Text $Command -Pattern $commandGlob) {
+                    return $blockedPath
+                }
+            } elseif ($Command.IndexOf([string]$candidate, $comparison) -ge 0) {
+                return $blockedPath
+            }
+        }
+    }
+
+    return $null
 }
 
 function Get-ToolReadContent {
@@ -1228,11 +1568,13 @@ try {
     $rawInput = [Console]::In.ReadToEnd()
 } catch {
     Write-Log '[unknown] Skipped: failed to read hook stdin.'
+    Write-FailClosedOutput -Reason 'Security hook could not read its input payload, so the request was stopped to avoid unmasked data exposure.'
     exit 0
 }
 
 if ([string]::IsNullOrWhiteSpace($rawInput)) {
     Write-Log '[unknown] Skipped: hook stdin was empty.'
+    Write-FailClosedOutput -Reason 'Security hook received an empty payload, so the request was stopped to avoid unmasked data exposure.'
     exit 0
 }
 
@@ -1240,6 +1582,7 @@ try {
     $hookData = ConvertTo-PlainHashtable -Value ($rawInput | ConvertFrom-Json)
 } catch {
     Write-Log "[unknown] Skipped: hook payload was not valid JSON. $($_.Exception.Message)"
+    Write-FailClosedOutput -Reason 'Security hook received an invalid JSON payload, so the request was stopped to avoid unmasked data exposure.'
     exit 0
 }
 
@@ -1247,18 +1590,21 @@ $hookEventRaw = [string](Get-MapValue -Map $hookData -Keys @('hook_event_name', 
 $hookEvent = Normalize-HookEventName -Name $hookEventRaw
 if ([string]::IsNullOrWhiteSpace($hookEvent)) {
     Write-Log '[unknown] Skipped: hook event name was missing.'
+    Write-FailClosedOutput -Reason 'Security hook payload did not include an event name, so the request was stopped to avoid unmasked data exposure.'
     exit 0
 }
 
 $workspaceRoot = [string](Get-MapValue -Map $hookData -Keys @('cwd') -Default '.')
 $config = Resolve-Config -WorkspaceRoot $workspaceRoot -ScriptDir $scriptDir -HookEvent $hookEvent
 if ($null -eq $config) {
+    Write-FailClosedOutput -HookEvent $hookEvent -Reason 'Security hook could not load a valid masking config, so the request was stopped to avoid unmasked data exposure.'
     exit 0
 }
 
 $patterns = Get-ActivePatterns -Config $config
 if ($patterns.Count -eq 0) {
     Write-Log "[$hookEvent] Skipped: config has no enabled patterns."
+    Write-FailClosedOutput -HookEvent $hookEvent -Reason 'Security hook loaded a config with no enabled patterns, so the request was stopped to avoid unmasked data exposure.'
     exit 0
 }
 
@@ -1269,6 +1615,8 @@ $denyPathRegex = if ($config.Contains('denyPathRegex')) { [string]$config['denyP
 $denyShellCommandRegex = if ($config.Contains('denyShellCommandRegex')) { [string]$config['denyShellCommandRegex'] } else { '(?i)\b(curl|wget|Invoke-WebRequest|Invoke-RestMethod|iwr|irm|scp|sftp|ftp|nc|ncat|telnet|rsync|aws\s+s3|az\s+storage|gcloud\s+(storage|compute)|gh\s+gist|pastebinit)\b' }
 $maskedPathMode = if ($config.Contains('maskedPathMode') -and -not [string]::IsNullOrWhiteSpace([string]$config['maskedPathMode'])) { [string]$config['maskedPathMode'] } else { 'workspaceMirror' }
 $maskedMirrorRoot = if ($config.Contains('maskedMirrorRoot') -and -not [string]::IsNullOrWhiteSpace([string]$config['maskedMirrorRoot'])) { [string]$config['maskedMirrorRoot'] } else { '.copilot/masked-data' }
+$userPromptUnsupportedMode = Resolve-UserPromptUnsupportedMode -Config $config
+$blockedPaths = Get-ConfiguredBlockedPaths -Config $config -WorkspaceRoot $workspaceRoot
 
 switch ($hookEvent) {
     'SessionStart' {
@@ -1282,15 +1630,15 @@ switch ($hookEvent) {
 
         if ($matchedPatterns.Count -gt 0) {
             $matchedPatternNames = (Get-PatternDisplayNames -Patterns $matchedPatterns) -join ', '
-            $maskedPrompt = Get-PreviewText -Text (Invoke-MaskText -Text $prompt -Patterns $patterns)
+            $maskedPrompt = Invoke-MaskText -Text $prompt -Patterns $patterns
             $action = Resolve-EnforcementAction -HookEvent $hookEvent -MatchedPatterns $matchedPatterns
 
             if ($action -eq 'stop') {
-                Write-CommonStopOutput -Reason "Sensitive patterns detected in user prompt: $matchedPatternNames" -SystemMessage ("Sensitive data detected in the prompt field. Masked preview:`n$maskedPrompt")
+                Write-UserPromptMaskOutput -MaskedPrompt $maskedPrompt -MatchedPatternNames $matchedPatternNames -UnsupportedMode $userPromptUnsupportedMode -Stop
                 exit 0
             }
 
-            Write-CommonStopOutput -Reason '' -SystemMessage ("Sensitive data detected in the prompt field. Best-effort masked preview:`n$maskedPrompt")
+            Write-UserPromptMaskOutput -MaskedPrompt $maskedPrompt -MatchedPatternNames $matchedPatternNames -UnsupportedMode $userPromptUnsupportedMode
             exit 0
         }
 
@@ -1349,15 +1697,23 @@ switch ($hookEvent) {
             exit 0
         }
 
-        $toolPath = Get-ToolPath -ToolInput $toolInputMap
+        $toolPaths = @(Get-ToolPaths -ToolInput $toolInputMap)
+        $toolPath = if ($toolPaths.Count -gt 0) { [string]$toolPaths[0] } else { $null }
         $resolvedPath = $null
         if (-not [string]::IsNullOrWhiteSpace($toolPath)) {
             $resolvedPath = Resolve-ToolPath -ToolPath $toolPath -WorkspaceRoot $workspaceRoot
         }
 
-        if (Test-ConfiguredRegexMatch -Text $toolPath -Regex $denyPathRegex) {
-            Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason "Access to '$toolPath' was denied by sensitive path policy."
-            exit 0
+        foreach ($candidatePath in $toolPaths) {
+            if (Get-BlockedPathMatch -CandidatePath $candidatePath -BlockedPaths $blockedPaths -WorkspaceRoot $workspaceRoot) {
+                Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason 'Access to this path was blocked by security policy.'
+                exit 0
+            }
+
+            if (Test-ConfiguredRegexMatch -Text $candidatePath -Regex $denyPathRegex) {
+                Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason "Access to '$candidatePath' was denied by sensitive path policy."
+                exit 0
+            }
         }
 
         if (Test-ShellTool -ToolName $toolName) {
@@ -1366,6 +1722,11 @@ switch ($hookEvent) {
             if ($null -ne $toolCommand) {
                 $action = Resolve-EnforcementAction -HookEvent $hookEvent -MatchedPatterns $matchedInputPatterns
                 $matchedPatternNames = (Get-PatternDisplayNames -Patterns $matchedInputPatterns) -join ', '
+
+                if (Get-BlockedCommandPathMatch -Command $toolCommand.Value -BlockedPaths $blockedPaths) {
+                    Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason 'Shell command was blocked because it referenced a path protected by security policy.'
+                    exit 0
+                }
 
                 if (Test-ConfiguredRegexMatch -Text $toolCommand.Value -Regex $denyShellCommandRegex) {
                     Write-DecisionOutput -HookEvent $hookEvent -Decision 'deny' -Reason 'Shell command was denied by exfiltration policy. Use a local-only command or ask for explicit review.'

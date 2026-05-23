@@ -5,6 +5,7 @@ param(
     [string]$WorkspaceRoot,
     [switch]$NoBackup,
     [switch]$NoWorkspaceGitignore,
+    [switch]$VSCodePromptBlock,
     [switch]$Check
 )
 
@@ -111,7 +112,8 @@ function Add-GitignoreEntry {
 function New-HookConfig {
     param(
         [string]$ScriptPath,
-        [string]$CwdPath = ''
+        [string]$CwdPath = '',
+        [switch]$BlockUnsupportedPromptRewrite
     )
 
     $bashScriptPath = $ScriptPath -replace '\\', '/'
@@ -133,6 +135,12 @@ function New-HookConfig {
 
         if (-not [string]::IsNullOrWhiteSpace($CwdPath)) {
             $hook['cwd'] = $CwdPath
+        }
+
+        if ($BlockUnsupportedPromptRewrite) {
+            $hook['env'] = @{
+                MASK_DATA_USER_PROMPT_UNSUPPORTED_MODE = 'block'
+            }
         }
 
         return $hook
@@ -176,7 +184,10 @@ $hooksDir = Join-Path $copilotHomePath 'hooks'
 $scriptsDir = Join-Path $hooksDir 'scripts'
 $logsDir = Join-Path $copilotHomePath 'logs'
 
-$sourceConfig = Join-Path $bundleRoot 'masking-config.json'
+$sourceConfig = Join-Path (Join-Path $bundleRoot 'hooks') 'masking-config.json'
+if (-not (Test-Path $sourceConfig -PathType Leaf)) {
+    $sourceConfig = Join-Path $bundleRoot 'masking-config.json'
+}
 $sourceScript = Join-Path (Join-Path (Join-Path $bundleRoot 'hooks') 'scripts') 'mask-sensitive-data.ps1'
 $sourceCommandWrapper = Join-Path (Join-Path (Join-Path $bundleRoot 'hooks') 'scripts') 'mask-command-output.ps1'
 
@@ -200,7 +211,7 @@ foreach ($directory in @($copilotHomePath, $hooksDir, $scriptsDir, $logsDir)) {
     New-Item -ItemType Directory -Force -Path $directory | Out-Null
 }
 
-$targetConfig = Join-Path $copilotHomePath 'masking-config.json'
+$targetConfig = Join-Path $hooksDir 'masking-config.json'
 $targetScript = Join-Path $scriptsDir 'mask-sensitive-data.ps1'
 $targetCommandWrapper = Join-Path $scriptsDir 'mask-command-output.ps1'
 $targetHookConfig = Join-Path $hooksDir 'sensitive-data-mask.json'
@@ -210,7 +221,7 @@ Copy-WithBackup -Source $sourceScript -Target $targetScript -NoBackup:$NoBackup
 Copy-WithBackup -Source $sourceCommandWrapper -Target $targetCommandWrapper -NoBackup:$NoBackup
 
 if ([string]::IsNullOrWhiteSpace($workspaceRootPath)) {
-    $hookConfigJson = New-HookConfig -ScriptPath $targetScript | ConvertTo-Json -Depth 10
+    $hookConfigJson = New-HookConfig -ScriptPath $targetScript -BlockUnsupportedPromptRewrite:$VSCodePromptBlock | ConvertTo-Json -Depth 10
     Write-Utf8NoBom -Path $targetHookConfig -Content ($hookConfigJson + [Environment]::NewLine)
     Test-JsonFile -Path $targetHookConfig
 } else {
@@ -222,19 +233,23 @@ if ([string]::IsNullOrWhiteSpace($workspaceRootPath)) {
         New-Item -ItemType Directory -Force -Path $directory | Out-Null
     }
 
-    $workspaceConfig = Join-Path $workspaceCopilotDir 'masking-config.json'
+    $workspaceConfig = Join-Path $workspaceHooksDir 'masking-config.json'
     $workspaceHookConfig = Join-Path $workspaceHooksDir 'sensitive-data-mask.json'
     Copy-WithBackup -Source $sourceConfig -Target $workspaceConfig -NoBackup:$NoBackup
 
-    $workspaceHookConfigJson = New-HookConfig -ScriptPath $targetScript -CwdPath $workspaceRootPath | ConvertTo-Json -Depth 10
+    $workspaceHookConfigJson = New-HookConfig -ScriptPath $targetScript -CwdPath $workspaceRootPath -BlockUnsupportedPromptRewrite:$VSCodePromptBlock | ConvertTo-Json -Depth 10
     Write-Utf8NoBom -Path $workspaceHookConfig -Content ($workspaceHookConfigJson + [Environment]::NewLine)
     Test-JsonFile -Path $workspaceHookConfig
 
     if (-not $NoWorkspaceGitignore) {
         Add-GitignoreEntry -WorkspacePath $workspaceRootPath -Entries @(
             '.copilot/masked-data/',
+            '.copilot/runs/',
+            '.copilot/logs/',
+            '.copilot/transcripts/',
+            '.copilot/*.log',
             '.copilot/hooks/sensitive-data-mask.json',
-            '.copilot/masking-config.json'
+            '.copilot/hooks/masking-config.json'
         )
     }
 }
@@ -266,6 +281,10 @@ if ([string]::IsNullOrWhiteSpace($workspaceRootPath)) {
     if ($existingGlobalHookConfig) {
         Write-Warning "Existing global hook config still exists at $targetHookConfig. Avoid enabling both global and workspace hook configs for the same request, or the hook may run twice."
     }
+}
+
+if ($VSCodePromptBlock) {
+    Write-Host "UserPromptSubmit fallback: block unsupported prompt rewrite consumers such as current VS Code hooks"
 }
 
 if ($runningOnWindows) {

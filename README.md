@@ -4,7 +4,7 @@ A starter kit for masking sensitive data in GitHub Copilot hooks with custom reg
 
 ## Runtime model
 
-- Repo-local bundle: `.github/hooks/*`
+- Repo-local launcher bundle: `.github/hooks/*`
 - Global CLI bundle: `cli/*` installed into `~/.copilot`
 - Windows native: Windows PowerShell 5.1
 - macOS, Linux, WSL, devcontainer: PowerShell 7 via `pwsh`
@@ -25,8 +25,8 @@ Important for `devcontainer + WSL`:
     masking-config.json
     sensitive-data-mask.json
     scripts/
-      mask-sensitive-data.ps1
-      mask-command-output.ps1
+      mask-sensitive-data.ps1       # launcher into cli/hooks/scripts
+      mask-command-output.ps1       # launcher into cli/hooks/scripts
 cli/
   install.ps1
   validate-config.ps1
@@ -35,9 +35,11 @@ cli/
   lib/
     mask-data-tools.ps1
   hooks/
+    masking-config.json
     sensitive-data-mask.json
     scripts/
       mask-sensitive-data.ps1
+      mask-command-output.ps1
 data/
   data-sample.json
 tests/
@@ -59,7 +61,7 @@ scripts/
 
 ### 1. Repo-local hooks
 
-The `.github/hooks` folder is self-contained. If you want masking to travel with the repository, this is the main bundle.
+The `.github/hooks` folder is the repo-local entrypoint. It keeps the hook config in the repository and launches the canonical masking engine from `cli/hooks/scripts`, so there is one implementation to maintain.
 
 ```text
 your-project/
@@ -91,8 +93,8 @@ The installer writes:
 
 ```text
 ~/.copilot/
-  masking-config.json
   hooks/
+    masking-config.json
     sensitive-data-mask.json
     scripts/
       mask-sensitive-data.ps1
@@ -106,7 +108,10 @@ Useful flags:
 .\cli\install.ps1 -Check
 .\cli\install.ps1 -NoBackup
 .\cli\install.ps1 -CopilotHome "$HOME/.copilot-test"
+.\cli\install.ps1 -WorkspaceRoot (Resolve-Path .) -VSCodePromptBlock
 ```
+
+`-VSCodePromptBlock` is recommended for VS Code because prompt rewrite output is not consumed by current VS Code hooks. The bundled config also sets `userPromptSubmitUnsupportedMode` to `block` so matched raw prompts fail closed by default.
 
 ## Devcontainer and WSL
 
@@ -124,13 +129,41 @@ The repo-local hook file already targets the Linux shell path through the `bash`
 
 Configs are strict JSON. Do not comment out rules. Disable them with `"enabled": false`.
 
-The starter config intentionally stays small:
+The starter config includes PCI/DSS account data, common secret formats, and PII:
 
-- `Credit Card`
+- PCI track data, PAN with Luhn validation, CVV, expiry, PIN block, service code, cardholder name
 - `API Key`
 - `Bearer Token`
+- `JWT`
 - `Password Assignment`
+- `Private Key`
+- `Email Address`
+- `US SSN`
 - `Demo Customer ID` in `customPatterns`
+
+Top-level guardrails:
+
+- `userPromptSubmitUnsupportedMode: "block"` stops matched raw prompts on surfaces that ignore prompt rewrite output.
+- `denyPathRegex` denies obvious secret/export/log/dump paths before file content can be read.
+- `blockedPaths` blocks fixed or wildcard-sensitive paths such as `secrets`, `logs`, `customer-data`, `payment-data`, `D:/etc/**`, `//folder-security/**`, and `**/private/**`.
+- `denyShellCommandRegex` blocks shell commands with outbound URLs, upload tools, remote CLIs, sensitive file references, and common interpreter network APIs.
+
+Example blocked path policy:
+
+```json
+{
+  "blockedPaths": [
+    "secrets",
+    "D:/etc/**",
+    "//folder-security/**",
+    "//server/share/folder-security/**",
+    "folder-security/**",
+    "**/private/**"
+  ]
+}
+```
+
+Relative entries resolve under the active workspace root. Absolute Windows paths, forward-slash paths, and UNC-style network paths are supported. Wildcards use PowerShell matching: `*` for any path text, `?` for one character, and bracket classes such as `[ab]`.
 
 Example:
 
@@ -146,11 +179,13 @@ Example:
 Runtime config lookup order:
 
 1. `MASK_DATA_CONFIG`
-2. `<workspace>/.copilot/masking-config.json`
-3. `<workspace>/.github/hooks/masking-config.json`
-4. `~/.copilot/masking-config.json`
+2. `<workspace>/.copilot/hooks/masking-config.json`
+3. `<workspace>/.copilot/masking-config.json`
+4. `<workspace>/.github/hooks/masking-config.json`
+5. `<hook-folder>/masking-config.json`
+6. `~/.copilot/masking-config.json`
 
-The first existing file wins.
+The first existing file wins. If the hook cannot load a valid config or the config has no enabled patterns, it fails closed instead of allowing the request through unmasked.
 
 ## Local tools
 
@@ -191,14 +226,18 @@ The shell wrapper now runs the same PowerShell fixture test through `pwsh`, so i
 
 ## Hook behavior
 
-- `SessionStart`: injects the masking policy into session context
-- `PreToolUse`: masks tool args, blocks sensitive numeric file paths, and asks before sending masked content to external tools
-- `PreCompact`: reminds Copilot to keep only masked placeholders
-- `SubagentStart`: passes the masking policy to spawned agents
+- `SessionStart`: injects the masking policy into session context.
+- `UserPromptSubmit`: masks supported prompt payloads and blocks matched prompts on unsupported rewrite surfaces.
+- `PreToolUse`: primary enforcement point; redirects sensitive file reads to `.copilot/masked-data`, denies blocked paths, and denies risky shell/network commands.
+- `PermissionRequest`: denies or interrupts only when pattern enforcement requests it; otherwise emits masked context.
+- `PostToolUse`, `Stop`, `SubagentStop`: best-effort leak detection and masked context after a tool or transcript already exists.
+- `PreCompact` and `SubagentStart`: remind downstream context/subagents to preserve masked placeholders only.
 
 ## Limits
 
 - Detection is regex-only. If the pattern misses, the hook misses.
 - Inline suggestions are not covered. This project only helps Copilot chat / hook flows.
+- VS Code file attachments can enter the initial model request before a mutable hook can rewrite the content.
+- Content exclusion policies do not cover every Copilot surface, especially CLI and agent flows; keep local hook and network controls enabled.
 - Linux-side environments must provide `pwsh`.
 - IntelliJ and other JetBrains IDEs do not expose the same hook API.

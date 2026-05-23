@@ -41,8 +41,8 @@ The installer creates or updates:
 
 ```text
 ~/.copilot/
-  masking-config.json
   hooks/
+    masking-config.json
     scripts/
       mask-sensitive-data.ps1
       mask-command-output.ps1
@@ -55,8 +55,8 @@ When `-WorkspaceRoot` is provided, the installer also creates or updates local w
 
 ```text
 <workspace>/.copilot/
-  masking-config.json
   hooks/
+    masking-config.json
     sensitive-data-mask.json
   masked-data/
 ```
@@ -76,6 +76,14 @@ Use a custom target to test without touching the real Copilot directory:
 .\cli\install.ps1 -CopilotHome "$HOME/.copilot-test" -WorkspaceRoot (Resolve-Path .)
 ```
 
+For current VS Code hooks, prompt rewrite output is not consumed. Use fail-closed workspace install so matched raw prompts are blocked before the model request:
+
+```powershell
+.\cli\install.ps1 -WorkspaceRoot (Resolve-Path .) -VSCodePromptBlock
+```
+
+This adds `MASK_DATA_USER_PROMPT_UNSUPPORTED_MODE=block` to the generated hook config. The bundled config also sets `userPromptSubmitUnsupportedMode: "block"` so prompt matches fail closed unless you explicitly change that value.
+
 Validate the config without installing anything:
 
 ```powershell
@@ -84,7 +92,7 @@ Validate the config without installing anything:
 
 ## Configuration
 
-`masking-config.json` is strict JSON. The bundled file ships mask-and-continue defaults for PCI/DSS account data, common PII, secrets, tokens, passwords, emails, SSNs, and customer IDs. Bundled patterns use `mask` enforcement so Copilot can keep working on payment projects while hook-visible sensitive values are replaced with placeholders.
+`masking-config.json` is strict JSON. The bundled file ships strict defaults for PCI/DSS account data, common PII, secrets, tokens, passwords, emails, SSNs, and customer IDs. Bundled patterns use `mask` enforcement for hook-visible tool data, while unsupported prompt rewrite surfaces are blocked by `userPromptSubmitUnsupportedMode: "block"`.
 
 Top-level policy controls:
 
@@ -93,8 +101,10 @@ Top-level policy controls:
 - `maskedMirrorRoot`: workspace-relative or absolute mirror root used when `maskedPathMode` is `workspaceMirror`. The bundled config uses `.copilot/masked-data`.
 - `sensitiveFilenameRegex`: path/filename candidate matcher. The bundled config looks for 13-19 digit PAN candidates anywhere in the path.
 - `sensitiveFilenameValidator`: optional extra check for `sensitiveFilenameRegex`. The bundled config uses `luhn`, so numeric filenames are treated as sensitive only when the candidate looks like a payment card PAN.
-- `denyPathRegex`: optional file path deny policy. The bundled CLI config leaves this empty so read tools can be redirected to masked mirror files instead of being denied.
-- `denyShellCommandRegex`: shell commands denied before execution because they can upload raw local files or exfiltrate data outside the masking flow, such as `curl --data-binary @file`, `scp`, `aws s3`, and gist upload commands.
+- `denyPathRegex`: file path deny policy for obvious secrets, exports, dumps, logs, and key material. File reads matching this policy are denied before content is read.
+- `blockedPaths`: fixed or wildcard file/directory paths that Copilot must not access. Relative entries resolve under the active workspace root. Matching file-tool paths are denied before execution, and shell commands that visibly reference a blocked path are denied as a guardrail.
+- `denyShellCommandRegex`: shell commands denied before execution because they can upload raw local files or exfiltrate data outside the masking flow, including outbound URLs, upload tools, remote cloud/SCM CLIs, sensitive file references, and common interpreter network APIs.
+- `userPromptSubmitUnsupportedMode`: fallback for consumers that ignore `modifiedPrompt`. The bundled config uses `block` to stop matched prompts instead of sending raw `<userRequest>`.
 
 Pattern-level controls:
 
@@ -113,18 +123,39 @@ Do not comment out patterns. Disable a rule with:
 }
 ```
 
+Block fixed paths and wildcard path groups with:
+
+```json
+{
+  "blockedPaths": [
+    "secrets",
+    "folder-security/**",
+    "**/private/**",
+    "D:/etc/**",
+    "//folder-security/**",
+    "//server/share/folder-security/**",
+    "D:\\Personal\\Sensitive",
+    "C:\\Users\\xxx\\.ssh"
+  ]
+}
+```
+
+The examples above block attempts such as `read_file D:/etc/app.env`, `read_file //folder-security/customer.csv`, `Get-Content folder-security/token.txt`, and any workspace path under a `private` directory. Prefer forward slashes in config values when possible; JSON backslashes must be escaped.
+
 Config lookup order at runtime:
 
 1. `MASK_DATA_CONFIG`
-2. `<workspace>/.copilot/masking-config.json`
-3. `<workspace>/.github/hooks/masking-config.json`
-4. `~/.copilot/masking-config.json`
+2. `<workspace>/.copilot/hooks/masking-config.json`
+3. `<workspace>/.copilot/masking-config.json`
+4. `<workspace>/.github/hooks/masking-config.json`
+5. `<hook-folder>/masking-config.json`
+6. `~/.copilot/masking-config.json` legacy fallback
 
-The first existing file wins. If that file is invalid JSON or has no enabled patterns, the hook skips and writes the reason to `~/.copilot/logs/mask-sensitive-data.log`.
+The first existing file wins. If that file is invalid JSON, missing, or has no enabled patterns, the hook fails closed and writes the reason to `~/.copilot/logs/mask-sensitive-data.log`.
 
 ## Repo-local bundle
 
-The repository also ships a self-contained `.github/hooks` bundle for per-repo usage. Use `cli/` when you want global install plus the local helper tools, and use `.github/hooks` when you want the hook to live with the repository.
+The repository also ships a `.github/hooks` launcher bundle for per-repo usage. It keeps repo-local hook config in `.github/hooks` and launches the canonical implementation from `cli/hooks/scripts` so the masking logic does not fork into two copies.
 
 ## Local Tools
 
@@ -204,8 +235,8 @@ This lets the agent reuse the redirected path without exposing the original PAN 
 ## Hook Behavior
 
 - `SessionStart`: emits the masking policy context.
-- `UserPromptSubmit`: scans the prompt text only. Bundled sensitive patterns configure `mask`, so the prompt is not stopped; the hook emits a masked advisory preview.
-- `PreToolUse`: the primary masking point. File-read tools are redirected to stable masked mirror copies when matching content or sensitive filenames are detected. Shell tools such as `bash`, `powershell`, `run_in_terminal`, `runInTerminal`, and `terminal` are wrapped through `mask-command-output.ps1` so stdout/stderr is masked before returning to the model. Commands matching `denyShellCommandRegex` are denied because they can send raw local files outside the hook-visible output path.
+- `UserPromptSubmit`: scans the prompt text only. Bundled sensitive patterns configure `mask`, and the bundled top-level prompt fallback blocks matched prompts on surfaces such as current VS Code hooks that ignore `modifiedPrompt`.
+- `PreToolUse`: the primary masking point. File-read tools are redirected to stable masked mirror copies when matching content or sensitive filenames are detected. Blocked paths and denied path patterns are rejected before content is read. Shell tools such as `bash`, `powershell`, `run_in_terminal`, `runInTerminal`, and `terminal` are wrapped through `mask-command-output.ps1` only after the shell command passes the exfiltration policy.
 - `PermissionRequest`: CLI-only advisory layer. Bundled sensitive patterns configure `mask`, so permission payloads are not denied by pattern matches.
 - `PostToolUse` and `PostToolUseFailure`: leak detection after tool execution. Bundled sensitive patterns configure `mask`, so the hook emits masked additional context instead of blocking. For file-read tools such as `read_file` and `view`, the hook can re-check the requested file path when the `PostToolUse` payload does not include the tool result body.
 - `PreCompact`: emits a best-effort reminder before compaction.
@@ -216,9 +247,10 @@ This lets the agent reuse the redirected path without exposing the original PAN 
 The practical behavior split is:
 
 1. `PreToolUse` can still rewrite hook-visible tool input and redirect reads to masked mirror files.
-2. Shell command policy denies known raw file upload/exfiltration commands before execution. This is a regex guardrail, not a full DLP engine; extend `denyShellCommandRegex` for your environment.
+2. Shell command policy denies known raw file upload/exfiltration commands before execution. This is a regex guardrail, not a full DLP engine; keep OS/container egress controls enabled for high-trust repositories.
 3. `PostToolUse` is later and therefore less reliable for prevention; keep sensitive reads on tools that `PreToolUse` can redirect or shell commands whose stdout/stderr wrapper can mask.
 4. Later events are otherwise advisory and best-effort only.
-5. VS Code attachment contents and extension-internal transcript/log fields can already be embedded or logged before any mutable hook sees them.
+5. Copilot SDK supports `modifiedPrompt`; Copilot CLI currently documents `userPromptSubmitted` output as not processed, and VS Code documents `UserPromptSubmit` as common-output-only. For those surfaces, prompt masking is best-effort/advisory unless `-VSCodePromptBlock`, `userPromptSubmitUnsupportedMode: "block"`, or per-pattern `UserPromptSubmit: "stop"` is active.
+6. VS Code attachment contents and extension-internal transcript/log fields can already be embedded or logged before any mutable hook sees them.
 
 That last point is a platform limitation: this CLI bundle can harden hook-visible payloads, but it cannot fix VS Code extension behavior where raw prompt attachments or internal hook telemetry are captured before the hook can rewrite them.

@@ -7,10 +7,12 @@
 # Usage:
 #   .\tests\test-masking.ps1
 #   .\tests\test-masking.ps1 -FixturePath .\tests\fixtures\test-sample-patterns.json
+#   .\tests\test-masking.ps1 -ConfigPath .\cli\hooks\masking-config.json
 # =============================================================
 param(
     [string]$FixturePath = "",
-    [string]$ProjectRoot = ""
+    [string]$ProjectRoot = "",
+    [string]$ConfigPath = ""
 )
 
 # ------------------------------------------------------------------
@@ -29,75 +31,39 @@ if (-not $ProjectRoot) {
 $ScriptOwnDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptOwnDir
 
-$ConfigPath = Join-Path $ProjectRoot ".github\hooks\masking-config.json"
 $FixtureDir = Join-Path $ProjectRoot "tests\fixtures"
+$LibraryPath = Join-Path $ProjectRoot "cli\lib\mask-data-tools.ps1"
 
-if (-not (Test-Path $ConfigPath)) {
-    Write-Error "Config not found: $ConfigPath"
+if (-not (Test-Path $LibraryPath -PathType Leaf)) {
+    Write-Error "Library not found: $LibraryPath"
+    exit 1
+}
+
+. $LibraryPath
+
+try {
+    $ResolvedConfigPath = Resolve-DefaultMaskDataConfigPath -ConfigPath $ConfigPath -WorkspaceRoot $ProjectRoot
+} catch {
+    Write-Error $_.Exception.Message
     exit 1
 }
 
 # ------------------------------------------------------------------
 # Load config patterns
 # ------------------------------------------------------------------
-$config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+$config = Read-MaskDataConfig -ConfigPath $ResolvedConfigPath
+$activePatterns = Get-ActiveMaskPatterns -Config $config
 
 function Invoke-Mask {
     param([string]$Content)
 
-    $result = $Content
-    foreach ($pattern in $config.patterns) {
-        # Skip disabled patterns
-        if ($null -ne $pattern.enabled -and $pattern.enabled -eq $false) {
-            continue
-        }
-
-        $regex = $pattern.regex
-        if (-not $regex) { continue }
-
-        $replacement = $pattern.replacement
-        if (-not $replacement) { $replacement = $pattern.name }
-        if (-not $replacement) { continue }
-
-        # PowerShell uses .NET regex which supports (?i) natively
-        try {
-            $result = [regex]::Replace($result, $regex, $replacement)
-        } catch {
-            Write-Warning "Regex error in pattern '$($pattern.name)': $_"
-        }
-    }
-
-    # Also apply customPatterns if present
-    if ($config.customPatterns) {
-        foreach ($cp in $config.customPatterns) {
-            if ($null -ne $cp.enabled -and $cp.enabled -eq $false) {
-                continue
-            }
-            $regex = $cp.regex
-            $replacement = if ($cp.replacement) { $cp.replacement } else { $cp.name }
-            if ($regex -and $replacement) {
-                try {
-                    $result = [regex]::Replace($result, $regex, $replacement)
-                } catch {
-                    Write-Warning "Regex error in custom pattern: $_"
-                }
-            }
-        }
-    }
-
-    return $result
+    return (Invoke-MaskDataText -Text $Content -Patterns $activePatterns)
 }
 
 function Test-HasSensitive {
     param([string]$Content)
-    foreach ($pattern in $config.patterns) {
-        if ($null -ne $pattern.enabled -and $pattern.enabled -eq $false) { continue }
-        $regex = $pattern.regex
-        if ($regex -and [regex]::IsMatch($Content, $regex)) {
-            return $true
-        }
-    }
-    return $false
+
+    return ((Get-MaskDataMatchedPatterns -Text $Content -Patterns $activePatterns).Count -gt 0)
 }
 
 # ------------------------------------------------------------------
@@ -240,7 +206,7 @@ Write-Host "  Sensitive Data Masking - Test Runner (PS)" -ForegroundColor White
 Write-Host "=============================================" -ForegroundColor White
 Write-Host "  Platform   : $platform" -ForegroundColor Cyan
 Write-Host "  PowerShell : $psVer" -ForegroundColor Cyan
-Write-Host "  Config     : $ConfigPath" -ForegroundColor DarkGray
+Write-Host "  Config     : $ResolvedConfigPath" -ForegroundColor DarkGray
 
 # Determine fixtures
 if ($FixturePath) {

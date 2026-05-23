@@ -6,7 +6,7 @@
       "name": "Credit card number",
       "input": "card: 4111111111111111",
       "expect_masked": true,
-      "expect_output": "card: [MASKED-CC]"
+      "expect_output": "card: [MASKED-PAN]"
     },
     {
       "id": "KEY-01",

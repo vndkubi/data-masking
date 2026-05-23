@@ -1,0 +1,175 @@
+{
+  "version": 1,
+  "disableAllHooks": false,
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "bash": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "powershell": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "command": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeoutSec": 15,
+        "windows": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "linux": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "osx": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeout": 15
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "type": "command",
+        "bash": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "powershell": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "command": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeoutSec": 15,
+        "windows": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "linux": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "osx": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeout": 15
+      }
+    ],
+    "PreToolUse": [
+      {
+        "type": "command",
+        "bash": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "powershell": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "command": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeoutSec": 15,
+        "windows": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "linux": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "osx": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeout": 15
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "type": "command",
+        "bash": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "powershell": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "command": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeoutSec": 15,
+        "windows": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "linux": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "osx": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeout": 15
+      }
+    ],
+    "PostToolUse": [
+      {
+        "type": "command",
+        "bash": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "powershell": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "command": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeoutSec": 15,
+        "windows": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "linux": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "osx": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeout": 15
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "type": "command",
+        "bash": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "powershell": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "command": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeoutSec": 15,
+        "windows": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "linux": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "osx": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeout": 15
+      }
+    ],
+    "PreCompact": [
+      {
+        "type": "command",
+        "bash": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "powershell": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "command": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeoutSec": 15,
+        "windows": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "linux": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "osx": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeout": 15
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "bash": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "powershell": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "command": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeoutSec": 15,
+        "windows": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "linux": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "osx": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeout": 15
+      }
+    ],
+    "SubagentStart": [
+      {
+        "type": "command",
+        "bash": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "powershell": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "command": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeoutSec": 15,
+        "windows": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "linux": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "osx": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeout": 15
+      }
+    ],
+    "SubagentStop": [
+      {
+        "type": "command",
+        "bash": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "powershell": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "command": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeoutSec": 15,
+        "windows": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "linux": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "osx": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeout": 15
+      }
+    ],
+    "SessionEnd": [
+      {
+        "type": "command",
+        "bash": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "powershell": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "command": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeoutSec": 15,
+        "windows": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "linux": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "osx": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeout": 15
+      }
+    ],
+    "ErrorOccurred": [
+      {
+        "type": "command",
+        "bash": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "powershell": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "command": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeoutSec": 15,
+        "windows": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "linux": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "osx": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeout": 15
+      }
+    ],
+    "Notification": [
+      {
+        "type": "command",
+        "bash": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "powershell": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "command": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeoutSec": 15,
+        "windows": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File \".github\\hooks\\scripts\\mask-sensitive-data.ps1\"",
+        "linux": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "osx": "pwsh -NoLogo -NoProfile -File \".github/hooks/scripts/mask-sensitive-data.ps1\"",
+        "timeout": 15
+      }
+    ]
+  }
+}
